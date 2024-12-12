@@ -4,3 +4,4 @@ transformers==4.44.2
 plotly==5.24.1
 streamlit==1.40.2
 tensorflow==2.17.0
+tf_keras==2.17.0
