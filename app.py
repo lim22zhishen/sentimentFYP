@@ -4,7 +4,7 @@ import datetime
 from transformers import pipeline
 import pandas as pd
 import plotly.express as px
-import whisper
+import openai_whisper as whisper
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -129,4 +129,3 @@ if uploaded_file is not None:
         os.remove(temp_file_path)
 else:
     st.info("Please upload a .wav file to start transcription.")
-
