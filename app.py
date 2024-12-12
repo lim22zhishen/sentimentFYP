@@ -5,7 +5,6 @@ from transformers import pipeline
 import pandas as pd
 import plotly.express as px
 import whisper
-from pocketsphinx import AudioFile
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -27,10 +26,10 @@ def batch_analyze_sentiments(messages):
 @st.cache_resource
 def load_whisper_model():
     return whisper.load_model("base")
-    
-# Streamlit UI
+
+# Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
-st.write("Upload a .wav file, and the app will transcribe the audio using OpenAI Whisper API and analyze the sentiment of the conversation.")
+st.write("Upload a .wav file, and the app will transcribe the audio and analyze the sentiment of the conversation.")
 
 # File uploader
 uploaded_file = st.file_uploader("Upload a .wav file", type=["wav"])
@@ -44,7 +43,7 @@ if uploaded_file is not None:
     st.audio(temp_file_path, format='audio/wav')
 
     # Choose transcription method
-    transcription_method = st.radio("Select transcription method:", ["Whisper", "PocketSphinx"])
+    transcription_method = st.radio("Select transcription method:", ["Whisper"])
 
     if transcription_method == "Whisper":
         st.write("Transcribing audio using Whisper...")
@@ -54,15 +53,6 @@ if uploaded_file is not None:
             transcription = result["text"]
         except Exception as e:
             st.error(f"Whisper transcription failed: {str(e)}")
-            transcription = ""
-
-    elif transcription_method == "PocketSphinx":
-        st.write("Transcribing audio using PocketSphinx...")
-        try:
-            audio = AudioFile(audio_file=temp_file_path)
-            transcription = "".join([phrase for phrase in audio])
-        except Exception as e:
-            st.error(f"PocketSphinx transcription failed: {str(e)}")
             transcription = ""
 
     if transcription:
@@ -139,3 +129,4 @@ if uploaded_file is not None:
         os.remove(temp_file_path)
 else:
     st.info("Please upload a .wav file to start transcription.")
+
