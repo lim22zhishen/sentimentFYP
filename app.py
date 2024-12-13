@@ -5,6 +5,7 @@ from transformers import pipeline
 import pandas as pd
 import plotly.express as px
 import whisper
+import ffmpeg
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
