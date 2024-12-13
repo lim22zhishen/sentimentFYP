@@ -9,7 +9,7 @@ import ffmpeg
 import re
 from pyannote.audio import Pipeline
 
-hf_key = st.secrets['token']
+hf_key = st.secrets['keys']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
