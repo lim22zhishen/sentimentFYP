@@ -30,6 +30,15 @@ def split_into_sentences(transcription):
     sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
     return [sentence.strip() for sentence in sentences if sentence.strip()]
 
+# Highlight positive and negative sentiments
+def style_table(row):
+    if row["Sentiment"] == "POSITIVE":
+        return ['background-color: #d4edda'] * len(row)
+    elif row["Sentiment"] == "NEGATIVE":
+        return ['background-color: #f8d7da'] * len(row)
+    else:
+        return [''] * len(row)
+                
 # Load Whisper model
 @st.cache_resource
 def load_whisper_model():
@@ -37,51 +46,49 @@ def load_whisper_model():
 
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
-st.write("Upload a .wav file, and the app will transcribe the audio and analyze the sentiment of the conversation.")
 
-# File uploader
-uploaded_file = st.file_uploader("Upload a .wav file", type=["wav"])
+# Input section for customer service conversation or audio file
+input_type = st.radio("Select Input Type", ("Text", "Audio"))
 
-if uploaded_file is not None:
-    # Save the uploaded file to a temporary location
-    temp_file_path = os.path.join("temp_audio.wav")
-    with open(temp_file_path, "wb") as f:
-        f.write(uploaded_file.read())
+if input_type == "Text":
+    st.write("Enter a customer service conversation (each line is a new interaction between customer and service agent):")
+    conversation = st.text_area("Conversation", height=300, placeholder="Enter customer-service interaction here...")
+elif input_type == "Audio":
+    st.write("Upload an audio file (WAV):")
+    audio_file = st.file_uploader("Upload Audio", type=["wav"])
 
-    st.audio(temp_file_path, format='audio/wav')
-
-    st.write("Transcribing audio using Whisper...")
-    try:
-        whisper_model = load_whisper_model()
-        result = whisper_model.transcribe(temp_file_path)
-        transcription = result["text"]
-    except Exception as e:
-        st.error(f"Whisper transcription failed: {str(e)}")
-        transcription = ""
-
-    if transcription:
-        st.success("Transcription Complete!")
-        st.text_area("Transcription", transcription, height=200)
-
-        # Process transcription for sentiment analysis
-        st.write("Analyzing sentiment...")
+# Add a button to run the analysis
+if st.button('Run Sentiment Analysis'):
+    if input_type == "Text" and conversation:
+        # Process the text input
+        messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
         
-        # Split transcription into sentences
-        sentences = split_into_sentences(transcription)
+if input_type == "Text":
+    st.write("Enter a customer service conversation (each line is a new interaction between customer and service agent):")
+    conversation = st.text_area("Conversation", height=300, placeholder="Enter customer-service interaction here...")
+elif input_type == "Audio":
+    st.write("Upload an audio file (e.g., WAV, MP3):")
+    audio_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "flac"])
 
-        # Limit processing of large transcriptions (for memory optimization)
-        MAX_MESSAGES = 30  # Only process up to 20 messages at once
-        if len(sentences) > MAX_MESSAGES:
+# Add a button to run the analysis
+if st.button('Run Sentiment Analysis'):
+    if input_type == "Text" and conversation:
+        # Process the text input
+        messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
+
+        # Limit processing of large conversations (for memory optimization)
+        MAX_MESSAGES = 20  # Only process up to 20 messages at once
+        if len(messages) > MAX_MESSAGES:
             st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
             messages = messages[:MAX_MESSAGES]
 
         # Analyze each message for sentiment in batches
-        sentiments = batch_analyze_sentiments(sentences)
+        sentiments = batch_analyze_sentiments(messages)
 
         # Create structured data
         results = []
-        for i, msg in enumerate(sentences):
-            # Split each message into speaker and content if possible
+        for i, msg in enumerate(messages):
+            # Split each message into speaker and content
             if ": " in msg:
                 speaker, content = msg.split(": ", 1)
             else:
@@ -98,16 +105,6 @@ if uploaded_file is not None:
 
         # Convert the results into a DataFrame
         df = pd.DataFrame(results)
-
-        # Highlight positive and negative sentiments
-        def style_table(row):
-            if row["Sentiment"] == "POSITIVE":
-                return ['background-color: #d4edda'] * len(row)
-            elif row["Sentiment"] == "NEGATIVE":
-                return ['background-color: #f8d7da'] * len(row)
-            else:
-                return [''] * len(row)
-
         styled_df = df.style.apply(style_table, axis=1)
 
         # Display the DataFrame
@@ -116,21 +113,100 @@ if uploaded_file is not None:
 
         # Plot sentiment over time using Plotly
         fig = px.line(
-            df,
-            x='Timestamp',
-            y='Score',
-            color='Sentiment',
-            title="Sentiment Score Over Time",
+            df, 
+            x='Timestamp', 
+            y='Score', 
+            color='Sentiment', 
+            title="Sentiment Score Over Time", 
             markers=True
         )
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
-
-    else:
-        st.warning("No transcription available to analyze.")
-
-    # Clean up the temporary file
-    if os.path.exists(temp_file_path):
-        os.remove(temp_file_path)
-else:
-    st.info("Please upload a .wav file to start transcription.")
+        
+    elif input_type == "Audio" and audio_file:
+        # File uploader
+        uploaded_file = st.file_uploader("Upload a .wav file", type=["wav"])
+        
+        if uploaded_file is not None:
+            # Save the uploaded file to a temporary location
+            temp_file_path = os.path.join("temp_audio.wav")
+            with open(temp_file_path, "wb") as f:
+                f.write(uploaded_file.read())
+        
+            st.audio(temp_file_path, format='audio/wav')
+        
+            st.write("Transcribing audio using Whisper...")
+            try:
+                whisper_model = load_whisper_model()
+                result = whisper_model.transcribe(temp_file_path)
+                transcription = result["text"]
+            except Exception as e:
+                st.error(f"Whisper transcription failed: {str(e)}")
+                transcription = ""
+        
+            if transcription:
+                st.success("Transcription Complete!")
+                st.text_area("Transcription", transcription, height=200)
+        
+                # Process transcription for sentiment analysis
+                st.write("Analyzing sentiment...")
+                
+                # Split transcription into sentences
+                sentences = split_into_sentences(transcription)
+        
+                # Limit processing of large transcriptions (for memory optimization)
+                MAX_MESSAGES = 30  # Only process up to 20 messages at once
+                if len(sentences) > MAX_MESSAGES:
+                    st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
+                    messages = messages[:MAX_MESSAGES]
+        
+                # Analyze each message for sentiment in batches
+                sentiments = batch_analyze_sentiments(sentences)
+        
+                # Create structured data
+                results = []
+                for i, msg in enumerate(sentences):
+                    # Split each message into speaker and content if possible
+                    if ": " in msg:
+                        speaker, content = msg.split(": ", 1)
+                    else:
+                        speaker, content = "Unknown", msg
+        
+                    sentiment = sentiments[i]
+                    results.append({
+                        "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "Speaker": speaker,
+                        "Message": content,
+                        "Sentiment": sentiment["label"],
+                        "Score": round(sentiment["score"], 2)
+                    })
+        
+                # Convert the results into a DataFrame
+                df = pd.DataFrame(results)
+        
+                styled_df = df.style.apply(style_table, axis=1)
+        
+                # Display the DataFrame
+                st.write("Conversation with Sentiment Labels:")
+                st.dataframe(styled_df)
+        
+                # Plot sentiment over time using Plotly
+                fig = px.line(
+                    df,
+                    x='Timestamp',
+                    y='Score',
+                    color='Sentiment',
+                    title="Sentiment Score Over Time",
+                    markers=True
+                )
+                fig.update_traces(marker=dict(size=10))
+                st.plotly_chart(fig)
+        
+            else:
+                st.warning("No transcription available to analyze.")
+        
+            # Clean up the temporary file
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+        else:
+            st.info("Please upload a .wav file to start transcription.")
