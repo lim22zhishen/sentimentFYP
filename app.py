@@ -7,10 +7,44 @@ import plotly.express as px
 import whisper
 import ffmpeg
 import re
+from pyannote.audio import Pipeline
+
+hf_token = st.secrets['keys']
+
+# Load Pyannote pipeline
+st.write("Loading Pyannote speaker diarization pipeline...")
+pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HF_TOKEN)
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 
+# Function to assign speakers to sentences
+def assign_speakers_to_sentences(transcription, speaker_segments):
+    """
+    Assign speaker labels to transcription sentences based on timestamps.
+    """
+    result = []
+    for sentence in transcription:
+        # Extract sentence start and end times
+        start_time = sentence["start"]
+        end_time = sentence["end"]
+        text = sentence["text"]
+        
+        # Find the speaker segment overlapping with the sentence
+        speaker = "Unknown"
+        for segment in speaker_segments:
+            if start_time >= segment["Start"] and end_time <= segment["End"]:
+                speaker = segment["Speaker"]
+                break
+        
+        result.append({
+            "Speaker": speaker,
+            "Text": text,
+            "Start": start_time,
+            "End": end_time
+        })
+    return result
+    
 # Function to scale sentiment scores
 def scale_score(label, score):
     return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
@@ -122,50 +156,61 @@ if st.button('Run Sentiment Analysis'):
             st.write("Transcribing audio using Whisper...")
             try:
                 whisper_model = load_whisper_model()
-                result = whisper_model.transcribe(temp_file_path)
+                
+                # Transcribe with timestamps
+                result = whisper_model.transcribe(temp_file_path, word_timestamps=True)
                 transcription = result["text"]
+                transcription_segments = result["segments"]  # Includes timestamps for each sentence
             except Exception as e:
                 st.error(f"Whisper transcription failed: {str(e)}")
                 transcription = ""
+                transcription_segments = []
         
             if transcription:
                 st.success("Transcription Complete!")
                 st.text_area("Transcription", transcription, height=200)
         
-                # Process transcription for sentiment analysis
+                # Speaker diarization
+                st.write("Identifying speakers using Pyannote...")
+                try:
+                    diarization = pipeline(temp_file_path)
+                    speaker_segments = [
+                        {"Speaker": label, "Start": segment.start, "End": segment.end}
+                        for segment, track, label in diarization.itertracks(yield_label=True)
+                    ]
+                except Exception as e:
+                    st.error(f"Speaker diarization failed: {str(e)}")
+                    speaker_segments = []
+        
+                # Assign speakers to transcription segments
+                sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
+        
+                # Sentiment analysis
                 st.write("Analyzing sentiment...")
-                
-                # Split transcription into sentences
-                sentences = split_into_sentences(transcription)
+                sentences = [sentence["Text"] for sentence in sentences_with_speakers]
         
                 # Limit processing of large transcriptions (for memory optimization)
-                MAX_MESSAGES = 30  # Only process up to 20 messages at once
+                MAX_MESSAGES = 30
                 if len(sentences) > MAX_MESSAGES:
                     st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
-                    messages = messages[:MAX_MESSAGES]
+                    sentences = sentences[:MAX_MESSAGES]
+                    sentences_with_speakers = sentences_with_speakers[:MAX_MESSAGES]
         
                 # Analyze each message for sentiment in batches
                 sentiments = batch_analyze_sentiments(sentences)
         
-                # Create structured data
+                # Build a DataFrame
                 results = []
-                for i, msg in enumerate(sentences):
-                    # Split each message into speaker and content if possible
-                    if ": " in msg:
-                        speaker, content = msg.split(": ", 1)
-                    else:
-                        speaker, content = "Unknown", msg
-        
+                for i, sentence in enumerate(sentences_with_speakers):
                     sentiment = sentiments[i]
                     results.append({
                         "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "Speaker": speaker,
-                        "Message": content,
+                        "Speaker": sentence["Speaker"],
+                        "Message": sentence["Text"],
                         "Sentiment": sentiment["label"],
                         "Score": round(sentiment["score"], 2)
                     })
         
-                # Convert the results into a DataFrame
                 df = pd.DataFrame(results)
         
                 styled_df = df.style.apply(style_table, axis=1)
@@ -179,8 +224,8 @@ if st.button('Run Sentiment Analysis'):
                     df,
                     x='Timestamp',
                     y='Score',
-                    color='Sentiment',
-                    title="Sentiment Score Over Time",
+                    color='Speaker',
+                    title="Sentiment by Speaker Over Time",
                     markers=True
                 )
                 fig.update_traces(marker=dict(size=10))
