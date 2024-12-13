@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.express as px
 import whisper
 import ffmpeg
+import re
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -22,6 +23,12 @@ def batch_analyze_sentiments(messages):
         for res in results
     ]
     return sentiments
+
+# Function to split transcription into sentences
+def split_into_sentences(transcription):
+    # Use regex to split by punctuation, keeping sentence structure
+    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
+    return [sentence.strip() for sentence in sentences if sentence.strip()]
 
 # Load Whisper model
 @st.cache_resource
@@ -58,8 +65,9 @@ if uploaded_file is not None:
 
         # Process transcription for sentiment analysis
         st.write("Analyzing sentiment...")
-        # Split transcription into separate messages (lines) for chunked processing
-        messages = [msg.strip() for msg in transcription.split("\n") if msg.strip()]
+        
+        # Split transcription into sentences
+        sentences = split_into_sentences(transcription)
 
         # Limit processing of large transcriptions (for memory optimization)
         MAX_MESSAGES = 20  # Only process up to 20 messages at once
@@ -68,7 +76,7 @@ if uploaded_file is not None:
             messages = messages[:MAX_MESSAGES]
 
         # Analyze each message for sentiment in batches
-        sentiments = batch_analyze_sentiments(messages)
+        sentiments = batch_analyze_sentiments(sentences)
 
         # Create structured data
         results = []
