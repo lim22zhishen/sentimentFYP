@@ -43,18 +43,14 @@ if uploaded_file is not None:
 
     st.audio(temp_file_path, format='audio/wav')
 
-    # Choose transcription method
-    transcription_method = st.radio("Select transcription method:", ["Whisper"])
-
-    if transcription_method == "Whisper":
-        st.write("Transcribing audio using Whisper...")
-        try:
-            whisper_model = load_whisper_model()
-            result = whisper_model.transcribe(temp_file_path)
-            transcription = result["text"]
-        except Exception as e:
-            st.error(f"Whisper transcription failed: {str(e)}")
-            transcription = ""
+    st.write("Transcribing audio using Whisper...")
+    try:
+        whisper_model = load_whisper_model()
+        result = whisper_model.transcribe(temp_file_path)
+        transcription = result["text"]
+    except Exception as e:
+        st.error(f"Whisper transcription failed: {str(e)}")
+        transcription = ""
 
     if transcription:
         st.success("Transcription Complete!")
