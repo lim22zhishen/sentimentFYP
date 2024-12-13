@@ -25,7 +25,7 @@ def batch_analyze_sentiments(messages):
 # Load Whisper model
 @st.cache_resource
 def load_whisper_model():
-    return whisper.load_model("base")
+    return whisper.load_model("large")
 
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
