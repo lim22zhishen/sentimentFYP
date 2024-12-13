@@ -7,3 +7,4 @@ tensorflow==2.17.0
 tf_keras==2.17.0
 openai-whisper
 ffmpeg-python
+pyannote.audio==3.3.2
