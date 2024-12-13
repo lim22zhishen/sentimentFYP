@@ -80,7 +80,7 @@ if uploaded_file is not None:
 
         # Create structured data
         results = []
-        for i, msg in enumerate(messages):
+        for i, msg in enumerate(sentences):
             # Split each message into speaker and content if possible
             if ": " in msg:
                 speaker, content = msg.split(": ", 1)
