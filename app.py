@@ -55,7 +55,7 @@ if input_type == "Text":
     conversation = st.text_area("Conversation", height=300, placeholder="Enter customer-service interaction here...")
 elif input_type == "Audio":
     st.write("Upload an audio file (WAV):")
-    audio_file = st.file_uploader("Upload Audio", type=["wav"])
+    uploaded_file = st.file_uploader("Upload Audio", type=["wav"])
 
 # Add a button to run the analysis
 if st.button('Run Sentiment Analysis'):
@@ -110,10 +110,7 @@ if st.button('Run Sentiment Analysis'):
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
         
-    elif input_type == "Audio" and audio_file:
-        # File uploader
-        uploaded_file = st.file_uploader("Upload a .wav file", type=["wav"])
-        
+    elif input_type == "Audio":  
         if uploaded_file is not None:
             # Save the uploaded file to a temporary location
             temp_file_path = os.path.join("temp_audio.wav")
