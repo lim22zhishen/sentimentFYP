@@ -70,8 +70,8 @@ if uploaded_file is not None:
         sentences = split_into_sentences(transcription)
 
         # Limit processing of large transcriptions (for memory optimization)
-        MAX_MESSAGES = 20  # Only process up to 20 messages at once
-        if len(messages) > MAX_MESSAGES:
+        MAX_MESSAGES = 30  # Only process up to 20 messages at once
+        if len(sentences) > MAX_MESSAGES:
             st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
             messages = messages[:MAX_MESSAGES]
 
