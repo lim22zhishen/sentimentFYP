@@ -62,19 +62,6 @@ if st.button('Run Sentiment Analysis'):
     if input_type == "Text" and conversation:
         # Process the text input
         messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
-        
-if input_type == "Text":
-    st.write("Enter a customer service conversation (each line is a new interaction between customer and service agent):")
-    conversation = st.text_area("Conversation", height=300, placeholder="Enter customer-service interaction here...")
-elif input_type == "Audio":
-    st.write("Upload an audio file (e.g., WAV, MP3):")
-    audio_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "flac"])
-
-# Add a button to run the analysis
-if st.button('Run Sentiment Analysis'):
-    if input_type == "Text" and conversation:
-        # Process the text input
-        messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
 
         # Limit processing of large conversations (for memory optimization)
         MAX_MESSAGES = 20  # Only process up to 20 messages at once
