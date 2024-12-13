@@ -7,6 +7,9 @@ import plotly.express as px
 import whisper
 import ffmpeg
 import re
+from pyannote.audio import Pipeline
+
+hf_key = st.secrets['keys']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -38,11 +41,51 @@ def style_table(row):
         return ['background-color: #f8d7da'] * len(row)
     else:
         return [''] * len(row)
-                
+
+def assign_speakers_to_sentences(transcription_segments, speaker_segments):
+    """
+    Match transcription sentences with speaker segments based on overlapping timestamps.
+
+    Args:
+        transcription_segments (list): List of transcription sentences with start and end times.
+        speaker_segments (list): List of speaker segments with start and end times.
+
+    Returns:
+        list: List of sentences with assigned speakers.
+    """
+    results = []
+    for segment in transcription_segments:
+        sentence_start = segment["start"]
+        sentence_end = segment["end"]
+        text = segment["text"]
+
+        # Default speaker is "Unknown"
+        speaker = "Unknown"
+
+        # Check for overlap with speaker segments
+        for speaker_segment in speaker_segments:
+            if sentence_start < speaker_segment["End"] and sentence_end > speaker_segment["Start"]:
+                speaker = speaker_segment["Speaker"]
+                break  # Assign the first matching speaker
+
+        results.append({
+            "Speaker": speaker,
+            "Text": text,
+            "Start": sentence_start,
+            "End": sentence_end
+        })
+    return results
+    
 # Load Whisper model
 @st.cache_resource
 def load_whisper_model():
     return whisper.load_model("base")
+
+# Load Pyannote speaker diarization pipeline
+@st.cache_resource
+def load_diarization_pipeline():
+    return Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=hf_key)
+
 
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
@@ -116,19 +159,45 @@ if st.button('Run Sentiment Analysis'):
             temp_file_path = os.path.join("temp_audio.wav")
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.read())
-        
+            
             st.audio(temp_file_path, format='audio/wav')
+            
+            st.write("Identifying speakers using Pyannote...")
+            try:
+                # Perform speaker diarization
+                diarization_pipeline = load_diarization_pipeline()
+                diarization = diarization_pipeline(temp_file_path)
+                speaker_segments = [
+                    {"Speaker": label, "Start": segment.start, "End": segment.end}
+                    for segment, track, label in diarization.itertracks(yield_label=True)
+                ]
+            except Exception as e:
+                st.error(f"Speaker diarization failed: {str(e)}")
+                speaker_segments = []
         
             st.write("Transcribing audio using Whisper...")
             try:
                 whisper_model = load_whisper_model()
-                result = whisper_model.transcribe(temp_file_path)
-                transcription = result["text"]
+                result = whisper_model.transcribe(temp_file_path, options={"word_timestamps": True})
+                transcription_segments = [
+                    {"start": word["start"], "end": word["end"], "text": word["text"]}
+                    for word in result["segments"]
+                ]
             except Exception as e:
                 st.error(f"Whisper transcription failed: {str(e)}")
-                transcription = ""
+                transcription_segments = []
         
-            if transcription:
+            if transcription_segments and speaker_segments:
+                # Match speakers to transcription sentences
+                sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
+        
+                # Display sentences with speaker tags
+                st.write("Conversation with Speaker Tags:")
+                for sentence in sentences_with_speakers:
+                    st.markdown(f"**{sentence['Speaker']}**: {sentence['Text']}")
+                
+                # Further process for sentiment analysis...
+
                 st.success("Transcription Complete!")
                 st.text_area("Transcription", transcription, height=200)
         
@@ -146,33 +215,25 @@ if st.button('Run Sentiment Analysis'):
         
                 # Analyze each message for sentiment in batches
                 sentiments = batch_analyze_sentiments(sentences)
-        
-                # Create structured data
+
+                # Create structured data with speaker labels
                 results = []
-                for i, msg in enumerate(sentences):
-                    # Split each message into speaker and content if possible
-                    if ": " in msg:
-                        speaker, content = msg.split(": ", 1)
-                    else:
-                        speaker, content = "Unknown", msg
-        
-                    sentiment = sentiments[i]
+                for sentence in sentences_with_speakers:
+                    sentiment = batch_analyze_sentiments([sentence["Text"]])[0]
                     results.append({
                         "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "Speaker": speaker,
-                        "Message": content,
+                        "Speaker": sentence["Speaker"],
+                        "Message": sentence["Text"],
                         "Sentiment": sentiment["label"],
                         "Score": round(sentiment["score"], 2)
                     })
-        
-                # Convert the results into a DataFrame
+                
+                # Convert to DataFrame and display
                 df = pd.DataFrame(results)
-        
                 styled_df = df.style.apply(style_table, axis=1)
-        
-                # Display the DataFrame
                 st.write("Conversation with Sentiment Labels:")
                 st.dataframe(styled_df)
+
         
                 # Plot sentiment over time using Plotly
                 fig = px.line(
