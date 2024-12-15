@@ -112,7 +112,7 @@ def load_whisper_model():
 @st.cache_resource
 def load_diarization_pipeline():
     # Use your Hugging Face token here
-    pipeline = SpeakerDiarization.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
     return pipeline
     
 # Streamlit app
