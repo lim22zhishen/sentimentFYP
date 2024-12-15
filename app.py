@@ -208,6 +208,7 @@ if st.button('Run Sentiment Analysis'):
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
     
             # Align sentences with timestamps and speakers
+            st.write("Analyzing timestamps...")
             sentences = split_into_sentences(transcription)
             sentences_with_timestamps = align_sentences_with_timestamps(segments, sentences)
             sentences_with_speakers = align_speakers_to_sentences(speaker_segments, sentences_with_timestamps)
