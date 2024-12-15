@@ -8,6 +8,11 @@ import whisper
 import ffmpeg
 import re
 import math
+from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
+from pyannote.core import Segment
+from pyannote.audio import Model
+
+HUGGINGFACE_TOKEN = = st.secrets['token']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -57,7 +62,34 @@ def align_sentences_with_timestamps(segments, sentences):
 
     return aligned_sentences
 
+def diarize_audio(diarization_pipeline, audio_file):
+    """
+    Perform speaker diarization using PyAnnote.
+    Returns a list of speaker segments (start time, end time, speaker label).
+    """
+    diarization_result = diarization_pipeline(audio_file)
+    speaker_segments = []
 
+    for segment, _, speaker in diarization_result.itertracks(yield_label=True):
+        speaker_segments.append({
+            "start": round(segment.start, 2),
+            "end": round(segment.end, 2),
+            "speaker": speaker
+        })
+    return speaker_segments
+
+def align_speakers_to_sentences(speaker_segments, sentences_with_timestamps):
+    """
+    Align PyAnnote speaker segments to Whisper sentences.
+    """
+    for sentence in sentences_with_timestamps:
+        sentence["speaker"] = "Unknown"
+        for seg in speaker_segments:
+            if seg["start"] <= sentence["start"] <= seg["end"]:
+                sentence["speaker"] = seg["speaker"]
+                break
+    return sentences_with_timestamps
+    
 # Function to split transcription into sentences
 def split_into_sentences(transcription):
     # Use regex to split by punctuation, keeping sentence structure
@@ -78,6 +110,13 @@ def style_table(row):
 def load_whisper_model():
     return whisper.load_model("base")
 
+# Load PyAnnote diarization pipeline
+@st.cache_resource
+def load_diarization_pipeline():
+    # Use your Hugging Face token here
+    pipeline = SpeakerDiarization.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
+    return pipeline
+    
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
 
@@ -144,15 +183,16 @@ if st.button('Run Sentiment Analysis'):
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
         
-    if input_type == "Audio":
+    elif input_type == "Audio":
         if uploaded_file is not None:
-            # Save the uploaded file to a temporary location
-            temp_file_path = os.path.join("temp_audio.wav")
+            # Save the uploaded file
+            temp_file_path = "temp_audio.wav"
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.read())
     
             st.audio(temp_file_path, format='audio/wav')
     
+            # Transcribe the audio using Whisper
             st.write("Transcribing audio using Whisper...")
             try:
                 whisper_model = load_whisper_model()
@@ -161,60 +201,49 @@ if st.button('Run Sentiment Analysis'):
                 segments = result.get("segments", [])
             except Exception as e:
                 st.error(f"Whisper transcription failed: {str(e)}")
-                transcription = ""
-                segments = []
-    
-            if transcription:
-                st.success("Transcription Complete!")
-                st.text_area("Transcription", transcription, height=200)
-    
-                # Split transcription into sentences
-                st.write("Splitting sentences with timestamps...")
-                sentences = split_into_sentences(transcription)
-    
-                # Align sentences with timestamps
-                aligned_sentences = align_sentences_with_timestamps(segments, sentences)
-    
-                # Display aligned sentences with timestamps
-                aligned_df = pd.DataFrame(aligned_sentences)
-                st.write("Aligned Sentences with Timestamps:")
-                st.dataframe(aligned_df)
-    
-                # Analyze sentiment for each sentence
-                st.write("Analyzing sentiment...")
-                messages = [s["text"] for s in aligned_sentences]
-                sentiments = batch_analyze_sentiments(messages)
-    
-                # Add sentiment analysis to the aligned DataFrame
-                for i, sentiment in enumerate(sentiments):
-                    aligned_sentences[i]["Sentiment"] = sentiment["label"]
-                    aligned_sentences[i]["Score"] = round(sentiment["score"], 2)
-    
-                # Convert to final DataFrame
-                final_df = pd.DataFrame(aligned_sentences)
-                styled_df = final_df.style.apply(style_table, axis=1)
-    
-                # Display results
-                st.write("Sentiment Analysis with Timestamps:")
-                st.dataframe(styled_df)
-    
-                # Plot sentiment over time
-                fig = px.line(
-                    final_df,
-                    x='start',
-                    y='Score',
-                    color='Sentiment',
-                    title="Sentiment Score Over Time",
-                    markers=True
-                )
-                fig.update_layout(xaxis_title="Time (Seconds)", yaxis_title="Sentiment Score")
-                st.plotly_chart(fig)
-    
-            else:
-                st.warning("No transcription available to analyze.")
-    
-            # Clean up the temporary file
-            if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
+                st.stop()
+    
+            # Diarize audio using PyAnnote
+            st.write("Performing speaker diarization...")
+            diarization_pipeline = load_diarization_pipeline()
+            speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
+    
+            # Align sentences with timestamps and speakers
+            sentences = split_into_sentences(transcription)
+            sentences_with_timestamps = align_sentences_with_timestamps(segments, sentences)
+            sentences_with_speakers = align_speakers_to_sentences(speaker_segments, sentences_with_timestamps)
+    
+            # Analyze sentiment
+            st.write("Analyzing sentiment...")
+            messages = [s["text"] for s in sentences_with_speakers]
+            sentiments = batch_analyze_sentiments(messages)
+    
+            # Combine everything into a final DataFrame
+            for i, sentiment in enumerate(sentiments):
+                sentences_with_speakers[i]["Sentiment"] = sentiment["label"]
+                sentences_with_speakers[i]["Score"] = round(sentiment["score"], 2)
+    
+            final_df = pd.DataFrame(sentences_with_speakers)
+    
+            # Display results
+            st.write("Speaker-Diarized Sentiment Analysis:")
+            styled_df = final_df.style.apply(style_table, axis=1)
+            st.dataframe(styled_df)
+    
+            # Visualization
+            fig = px.line(
+                final_df,
+                x='start',
+                y='Score',
+                color='speaker',
+                title="Sentiment Score Over Time by Speaker",
+                markers=True
+            )
+            fig.update_layout(xaxis_title="Time (Seconds)", yaxis_title="Sentiment Score")
+            st.plotly_chart(fig)
+    
+            # Clean up
+            os.remove(temp_file_path)
         else:
             st.info("Please upload a .wav file to start transcription.")
