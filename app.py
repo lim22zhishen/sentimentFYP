@@ -28,38 +28,6 @@ def batch_analyze_sentiments(messages):
     ]
     return sentiments
 
-def align_sentences_with_timestamps(segments, sentences):
-    """
-    Align Whisper transcription segments with split sentences and extract timestamps.
-    """
-    aligned_sentences = []
-    current_segment_index = 0
-    current_start = segments[0]['start'] if segments else 0.0
-
-    for sentence in sentences:
-        while current_segment_index < len(segments):
-            segment = segments[current_segment_index]
-            if sentence in segment['text']:
-                # Align the sentence with the segment timestamp
-                aligned_sentences.append({
-                    "start": round(segment['start'], 2),
-                    "end": round(segment['end'], 2),
-                    "text": sentence
-                })
-                current_segment_index += 1
-                break
-            current_segment_index += 1
-        else:
-            # If no exact match, estimate the timestamp
-            aligned_sentences.append({
-                "start": round(current_start, 2),
-                "end": round(current_start + 5, 2),  # Assume ~5 seconds duration
-                "text": sentence
-            })
-            current_start += 5
-
-    return aligned_sentences
-
 def diarize_audio(diarization_pipeline, audio_file):
     """
     Perform speaker diarization using PyAnnote.
@@ -76,17 +44,45 @@ def diarize_audio(diarization_pipeline, audio_file):
         })
     return speaker_segments
 
-def align_speakers_to_sentences(speaker_segments, sentences_with_timestamps):
+def align_sentences_with_diarization(sentences, whisper_word_timestamps, speaker_segments):
     """
-    Align PyAnnote speaker segments to Whisper sentences.
+    Align Whisper sentences with PyAnnote speaker diarization results.
     """
-    for sentence in sentences_with_timestamps:
-        sentence["speaker"] = "Unknown"
-        for seg in speaker_segments:
-            if seg["start"] <= sentence["start"] <= seg["end"]:
-                sentence["speaker"] = seg["speaker"]
+    aligned_sentences = []
+
+    # Loop through sentences and estimate speaker
+    for sentence in sentences:
+        words = sentence.split()
+        sentence_start = None
+        sentence_end = None
+
+        # Find the start and end timestamps for the current sentence
+        for word in whisper_word_timestamps:
+            if word['word'] == words[0] and sentence_start is None:
+                sentence_start = word['start']
+            if word['word'] == words[-1]:
+                sentence_end = word['end']
+
+        # Fallback in case timestamps are missing
+        sentence_start = round(sentence_start or 0.0, 2)
+        sentence_end = round(sentence_end or sentence_start + 5, 2)
+
+        # Assign speaker based on diarization timestamps
+        speaker = "Unknown"
+        for segment in speaker_segments:
+            if segment['start'] <= sentence_start <= segment['end']:
+                speaker = segment['speaker']
                 break
-    return sentences_with_timestamps
+
+        aligned_sentences.append({
+            "start": sentence_start,
+            "end": sentence_end,
+            "text": sentence,
+            "speaker": speaker
+        })
+
+    return aligned_sentences
+
     
 # Function to split transcription into sentences
 def split_into_sentences(transcription):
@@ -197,6 +193,10 @@ if st.button('Run Sentiment Analysis'):
                 result = whisper_model.transcribe(temp_file_path, word_timestamps=True)
                 transcription = result["text"]
                 segments = result.get("segments", [])
+                word_timestamps = [
+                    {"word": word["word"].strip(), "start": word["start"], "end": word["end"]}
+                    for segment in segments for word in segment["words"]
+                ]
             except Exception as e:
                 st.error(f"Whisper transcription failed: {str(e)}")
                 os.remove(temp_file_path)
@@ -210,8 +210,8 @@ if st.button('Run Sentiment Analysis'):
             # Align sentences with timestamps and speakers
             st.write("Analyzing timestamps...")
             sentences = split_into_sentences(transcription)
-            sentences_with_timestamps = align_sentences_with_timestamps(segments, sentences)
-            sentences_with_speakers = align_speakers_to_sentences(speaker_segments, sentences_with_timestamps)
+            sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
+
     
             # Analyze sentiment
             st.write("Analyzing sentiment...")
