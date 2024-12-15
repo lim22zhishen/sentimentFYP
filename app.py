@@ -7,6 +7,7 @@ import plotly.express as px
 import whisper
 import ffmpeg
 import re
+import math
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -23,6 +24,39 @@ def batch_analyze_sentiments(messages):
         for res in results
     ]
     return sentiments
+
+def align_sentences_with_timestamps(segments, sentences):
+    """
+    Align Whisper transcription segments with split sentences and extract timestamps.
+    """
+    aligned_sentences = []
+    current_segment_index = 0
+    current_start = segments[0]['start'] if segments else 0.0
+
+    for sentence in sentences:
+        while current_segment_index < len(segments):
+            segment = segments[current_segment_index]
+            if sentence in segment['text']:
+                # Align the sentence with the segment timestamp
+                aligned_sentences.append({
+                    "start": round(segment['start'], 2),
+                    "end": round(segment['end'], 2),
+                    "text": sentence
+                })
+                current_segment_index += 1
+                break
+            current_segment_index += 1
+        else:
+            # If no exact match, estimate the timestamp
+            aligned_sentences.append({
+                "start": round(current_start, 2),
+                "end": round(current_start + 5, 2),  # Assume ~5 seconds duration
+                "text": sentence
+            })
+            current_start += 5
+
+    return aligned_sentences
+
 
 # Function to split transcription into sentences
 def split_into_sentences(transcription):
@@ -110,85 +144,75 @@ if st.button('Run Sentiment Analysis'):
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
         
-    elif input_type == "Audio":  
+    if input_type == "Audio":
         if uploaded_file is not None:
             # Save the uploaded file to a temporary location
             temp_file_path = os.path.join("temp_audio.wav")
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.read())
-        
+    
             st.audio(temp_file_path, format='audio/wav')
-        
+    
             st.write("Transcribing audio using Whisper...")
             try:
                 whisper_model = load_whisper_model()
-                result = whisper_model.transcribe(temp_file_path)
+                result = whisper_model.transcribe(temp_file_path, word_timestamps=True)
                 transcription = result["text"]
+                segments = result.get("segments", [])
             except Exception as e:
                 st.error(f"Whisper transcription failed: {str(e)}")
                 transcription = ""
-        
+                segments = []
+    
             if transcription:
                 st.success("Transcription Complete!")
                 st.text_area("Transcription", transcription, height=200)
-        
-                # Process transcription for sentiment analysis
-                st.write("Analyzing sentiment...")
-                
+    
                 # Split transcription into sentences
+                st.write("Splitting sentences with timestamps...")
                 sentences = split_into_sentences(transcription)
-        
-                # Limit processing of large transcriptions (for memory optimization)
-                MAX_MESSAGES = 30  # Only process up to 20 messages at once
-                if len(sentences) > MAX_MESSAGES:
-                    st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
-                    messages = messages[:MAX_MESSAGES]
-        
-                # Analyze each message for sentiment in batches
-                sentiments = batch_analyze_sentiments(sentences)
-        
-                # Create structured data
-                results = []
-                for i, msg in enumerate(sentences):
-                    # Split each message into speaker and content if possible
-                    if ": " in msg:
-                        speaker, content = msg.split(": ", 1)
-                    else:
-                        speaker, content = "Unknown", msg
-        
-                    sentiment = sentiments[i]
-                    results.append({
-                        "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "Speaker": speaker,
-                        "Message": content,
-                        "Sentiment": sentiment["label"],
-                        "Score": round(sentiment["score"], 2)
-                    })
-        
-                # Convert the results into a DataFrame
-                df = pd.DataFrame(results)
-        
-                styled_df = df.style.apply(style_table, axis=1)
-        
-                # Display the DataFrame
-                st.write("Conversation with Sentiment Labels:")
+    
+                # Align sentences with timestamps
+                aligned_sentences = align_sentences_with_timestamps(segments, sentences)
+    
+                # Display aligned sentences with timestamps
+                aligned_df = pd.DataFrame(aligned_sentences)
+                st.write("Aligned Sentences with Timestamps:")
+                st.dataframe(aligned_df)
+    
+                # Analyze sentiment for each sentence
+                st.write("Analyzing sentiment...")
+                messages = [s["text"] for s in aligned_sentences]
+                sentiments = batch_analyze_sentiments(messages)
+    
+                # Add sentiment analysis to the aligned DataFrame
+                for i, sentiment in enumerate(sentiments):
+                    aligned_sentences[i]["Sentiment"] = sentiment["label"]
+                    aligned_sentences[i]["Score"] = round(sentiment["score"], 2)
+    
+                # Convert to final DataFrame
+                final_df = pd.DataFrame(aligned_sentences)
+                styled_df = final_df.style.apply(style_table, axis=1)
+    
+                # Display results
+                st.write("Sentiment Analysis with Timestamps:")
                 st.dataframe(styled_df)
-        
-                # Plot sentiment over time using Plotly
+    
+                # Plot sentiment over time
                 fig = px.line(
-                    df,
-                    x='Timestamp',
+                    final_df,
+                    x='start',
                     y='Score',
                     color='Sentiment',
                     title="Sentiment Score Over Time",
                     markers=True
                 )
-                fig.update_traces(marker=dict(size=10))
+                fig.update_layout(xaxis_title="Time (Seconds)", yaxis_title="Sentiment Score")
                 st.plotly_chart(fig)
-        
+    
             else:
                 st.warning("No transcription available to analyze.")
-        
+    
             # Clean up the temporary file
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
