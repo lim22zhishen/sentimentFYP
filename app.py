@@ -12,7 +12,7 @@ from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
 from pyannote.core import Segment
 from pyannote.audio import Model
 
-HUGGINGFACE_TOKEN = = st.secrets['token']
+HUGGINGFACE_TOKEN = st.secrets['token']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
