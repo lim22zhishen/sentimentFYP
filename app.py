@@ -8,9 +8,7 @@ import whisper
 import ffmpeg
 import re
 import math
-from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
-from pyannote.core import Segment
-from pyannote.audio import Model
+from pyannote.audio import Pipeline
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
