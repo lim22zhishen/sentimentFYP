@@ -27,25 +27,6 @@ def detect_language(text):
         return "unknown"
 
 # Multilingual sentiment analysis with translation fallback
-from langdetect import detect
-from transformers import pipeline
-
-# Multilingual sentiment analysis pipeline (uses a multilingual model)
-multilingual_sentiment_pipeline = pipeline(
-    "sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment"
-)
-
-# Translation pipeline (Helsinki-NLP models)
-translator = pipeline("translation", model="Helsinki-NLP/opus-mt-mul-en")
-
-# Function to detect language
-def detect_language(text):
-    try:
-        return detect(text)
-    except:
-        return "unknown"
-
-# Multilingual sentiment analysis with translation fallback
 def analyze_multilingual_sentiment(texts):
     sentiments = []
     for text in texts:
