@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import datetime
-from transformers import pipeline
 import pandas as pd
 import plotly.express as px
 import whisper
@@ -10,6 +9,7 @@ import re
 import math
 from pyannote.audio import Pipeline
 from langdetect import detect
+from transformers import pipeline
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
