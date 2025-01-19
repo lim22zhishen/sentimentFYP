@@ -10,8 +10,6 @@ import re
 import math
 from pyannote.audio import Pipeline
 from langdetect import detect
-from transformers import pipeline
-
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
