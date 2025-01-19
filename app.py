@@ -159,11 +159,6 @@ def load_diarization_pipeline():
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
     return pipeline
 
-# Load translation pipeline
-@st.cache_resource
-def load_translation_pipeline():
-    return pipeline("translation", model="Helsinki-NLP/opus-mt-mul-en")
-
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
 
