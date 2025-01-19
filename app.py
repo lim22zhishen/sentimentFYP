@@ -37,7 +37,7 @@ def analyze_multilingual_sentiment(texts):
             
             # Direct sentiment analysis for all languages
             try:
-                result = multilingual_sentiment_pipeline(text)
+                result = sentiment_pipeline(text)
                 
                 # Convert 1-5 star rating to sentiment label
                 score = int(result[0]['label'].split()[0])
@@ -48,7 +48,7 @@ def analyze_multilingual_sentiment(texts):
                 # Fallback to translation if direct analysis fails
                 if language != "en":
                     translated_text = translator(text, max_length=512)[0]["translation_text"]
-                    result = multilingual_sentiment_pipeline(translated_text)
+                    result = sentiment_pipeline(translated_text)
                     score = int(result[0]['label'].split()[0])
                     normalized_score = (score - 1) / 4
                     sentiment_label = "POSITIVE" if score > 3 else "NEGATIVE" if score < 3 else "NEUTRAL"
