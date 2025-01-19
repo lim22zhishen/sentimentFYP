@@ -9,12 +9,53 @@ import ffmpeg
 import re
 import math
 from pyannote.audio import Pipeline
+from langdetect import detect
+from transformers import pipeline
+
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
-sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+sentiment_pipeline = pipeline(
+    "sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment"
+)
 
+# Translation pipeline (Helsinki-NLP models)
+translator = pipeline("translation", model="Helsinki-NLP/opus-mt-mul-en")
+
+# Function to detect language
+def detect_language(text):
+    try:
+        return detect(text)
+    except:
+        return "unknown"
+
+# Multilingual sentiment analysis with translation fallback
+def analyze_multilingual_sentiment(texts):
+    sentiments = []
+    for text in texts:
+        language = detect_language(text)
+        
+        if language == "en":
+            # Directly analyze if English
+            result = multilingual_sentiment_pipeline(text)
+        else:
+            # Translate to English for non-English text
+            try:
+                translated_text = translator(text, max_length=512)[0]["translation_text"]
+                result = multilingual_sentiment_pipeline(translated_text)
+            except Exception as e:
+                result = [{"label": "ERROR", "score": 0}]
+                st.error(f"Translation failed for text: {text}. Error: {str(e)}")
+        
+        sentiments.append({
+            "original_text": text,
+            "language": language,
+            "sentiment": result[0]["label"],
+            "score": round(result[0]["score"], 2)
+        })
+    return sentiments
+    
 # Function to scale sentiment scores
 def scale_score(label, score):
     return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
@@ -110,7 +151,12 @@ def load_diarization_pipeline():
     # Use your Hugging Face token here
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
     return pipeline
-    
+
+# Load translation pipeline
+@st.cache_resource
+def load_translation_pipeline():
+    return pipeline("translation", model="Helsinki-NLP/opus-mt-mul-en")
+
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
 
@@ -129,42 +175,42 @@ if st.button('Run Sentiment Analysis'):
     if input_type == "Text" and conversation:
         # Process the text input
         messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
-
-        # Limit processing of large conversations (for memory optimization)
-        MAX_MESSAGES = 20  # Only process up to 20 messages at once
+    
+        # Limit processing of large conversations
+        MAX_MESSAGES = 30
         if len(messages) > MAX_MESSAGES:
-            st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
+            st.warning(f"Only analyzing the first {MAX_MESSAGES} messages.")
             messages = messages[:MAX_MESSAGES]
-
-        # Analyze each message for sentiment in batches
-        sentiments = batch_analyze_sentiments(messages)
-
+    
+        # Analyze each message for sentiment
+        sentiments = analyze_multilingual_sentiment(messages)
+    
         # Create structured data
         results = []
-        for i, msg in enumerate(messages):
-            # Split each message into speaker and content
+        for i, sentiment in enumerate(sentiments):
+            msg = messages[i]
             if ": " in msg:
                 speaker, content = msg.split(": ", 1)
             else:
                 speaker, content = "Unknown", msg
-
-            sentiment = sentiments[i]
+            
             results.append({
                 "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 "Speaker": speaker,
-                "Message": content,
-                "Sentiment": sentiment["label"],
-                "Score": round(sentiment["score"], 2)
+                "Message": sentiment["original_text"],
+                "Language": sentiment["language"],
+                "Sentiment": sentiment["sentiment"],
+                "Score": sentiment["score"]
             })
-
+    
         # Convert the results into a DataFrame
         df = pd.DataFrame(results)
         styled_df = df.style.apply(style_table, axis=1)
-
+    
         # Display the DataFrame
         st.write("Conversation with Sentiment Labels:")
         st.dataframe(styled_df)
-
+    
         # Plot sentiment over time using Plotly
         fig = px.line(
             df, 
@@ -176,7 +222,7 @@ if st.button('Run Sentiment Analysis'):
         )
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
-        
+
     elif input_type == "Audio":
         if uploaded_file is not None:
             # Save the uploaded file
@@ -212,17 +258,18 @@ if st.button('Run Sentiment Analysis'):
             sentences = split_into_sentences(transcription)
             sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
 
-    
             # Analyze sentiment
             st.write("Analyzing sentiment...")
             messages = [s["text"] for s in sentences_with_speakers]
-            sentiments = batch_analyze_sentiments(messages)
-    
+            sentiments = analyze_multilingual_sentiment(messages)
+            
             # Combine everything into a final DataFrame
             for i, sentiment in enumerate(sentiments):
-                sentences_with_speakers[i]["Sentiment"] = sentiment["label"]
-                sentences_with_speakers[i]["Score"] = round(sentiment["score"], 2)
-    
+                sentences_with_speakers[i]["Sentiment"] = sentiment["sentiment"]
+                sentences_with_speakers[i]["Score"] = sentiment["score"]
+                sentences_with_speakers[i]["Language"] = sentiment["language"]
+
+
             final_df = pd.DataFrame(sentences_with_speakers)
     
             # Display results
