@@ -14,7 +14,24 @@ from transformers import pipeline
 HUGGINGFACE_TOKEN = st.secrets['token']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
-sentiment_pipeline = pipeline(
+sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+
+# Translation pipeline (Helsinki-NLP models)
+translator = pipeline("translation", model="Helsinki-NLP/opus-mt-mul-en")
+
+# Function to detect language
+def detect_language(text):
+    try:
+        return detect(text)
+    except:
+        return "unknown"
+
+# Multilingual sentiment analysis with translation fallback
+from langdetect import detect
+from transformers import pipeline
+
+# Multilingual sentiment analysis pipeline (uses a multilingual model)
+multilingual_sentiment_pipeline = pipeline(
     "sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment"
 )
 
@@ -32,45 +49,28 @@ def detect_language(text):
 def analyze_multilingual_sentiment(texts):
     sentiments = []
     for text in texts:
-        try:
-            language = detect_language(text)
-            
-            # Direct sentiment analysis for all languages
+        language = detect_language(text)
+        
+        if language == "en":
+            # Directly analyze if English
+            result = sentiment_pipeline(text)
+        else:
+            # Translate to English for non-English text
             try:
-                result = sentiment_pipeline(text)
-                
-                # Convert 1-5 star rating to sentiment label
-                score = int(result[0]['label'].split()[0])
-                normalized_score = (score - 1) / 4  # Convert 1-5 to 0-1 range
-                sentiment_label = "POSITIVE" if score > 3 else "NEGATIVE" if score < 3 else "NEUTRAL"
-                
-            except Exception as sentiment_error:
-                # Fallback to translation if direct analysis fails
-                if language != "en":
-                    translated_text = translator(text, max_length=512)[0]["translation_text"]
-                    result = sentiment_pipeline(translated_text)
-                    score = int(result[0]['label'].split()[0])
-                    normalized_score = (score - 1) / 4
-                    sentiment_label = "POSITIVE" if score > 3 else "NEGATIVE" if score < 3 else "NEUTRAL"
-                else:
-                    raise sentiment_error
-
-            sentiments.append({
-                "original_text": text,
-                "language": language,
-                "sentiment": sentiment_label,
-                "score": round(normalized_score * 5, 2)  # Scale to -5 to 5 range
-            })
-        except Exception as e:
-            st.warning(f"Analysis failed for text: {text[:50]}... Error: {str(e)}")
-            sentiments.append({
-                "original_text": text,
-                "language": "unknown",
-                "sentiment": "NEUTRAL",
-                "score": 0
-            })
-    
+                translated_text = translator(text, max_length=512)[0]["translation_text"]
+                result = sentiment_pipeline(translated_text)
+            except Exception as e:
+                result = [{"label": "ERROR", "score": 0}]
+                st.error(f"Translation failed for text: {text}. Error: {str(e)}")
+        
+        sentiments.append({
+            "original_text": text,
+            "language": language,
+            "sentiment": result[0]["label"],
+            "score": round(result[0]["score"], 2)
+        })
     return sentiments
+
     
 # Function to scale sentiment scores
 def scale_score(label, score):
