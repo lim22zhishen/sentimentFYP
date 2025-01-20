@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import datetime
+from transformers import pipeline
 import pandas as pd
 import plotly.express as px
 import whisper
@@ -8,54 +9,24 @@ import ffmpeg
 import re
 import math
 from pyannote.audio import Pipeline
-from langdetect import detect
-from transformers import pipeline
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 
-# Translation pipeline (Helsinki-NLP models)
-translator = pipeline("translation", model="Helsinki-NLP/opus-mt-mul-en")
-
-# Function to detect language
-def detect_language(text):
-    try:
-        return detect(text)
-    except:
-        return "unknown"
-
-# Multilingual sentiment analysis with translation fallback
-def analyze_multilingual_sentiment(texts):
-    sentiments = []
-    for text in texts:
-        language = detect_language(text)
-        
-        if language == "en":
-            # Directly analyze if English
-            result = sentiment_pipeline(text)
-        else:
-            # Translate to English for non-English text
-            try:
-                translated_text = translator(text, max_length=512)[0]["translation_text"]
-                result = sentiment_pipeline(translated_text)
-            except Exception as e:
-                result = [{"label": "ERROR", "score": 0}]
-                st.error(f"Translation failed for text: {text}. Error: {str(e)}")
-        
-        sentiments.append({
-            "original_text": text,
-            "language": language,
-            "sentiment": result[0]["label"],
-            "score": round(result[0]["score"], 2)
-        })
-    return sentiments
-
-    
 # Function to scale sentiment scores
 def scale_score(label, score):
     return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
+
+# Function to analyze sentiment in batches
+def batch_analyze_sentiments(messages):
+    results = sentiment_pipeline(messages)
+    sentiments = [
+        {"label": res["label"], "score": scale_score(res["label"], res["score"])}
+        for res in results
+    ]
+    return sentiments
 
 def diarize_audio(diarization_pipeline, audio_file):
     """
@@ -139,7 +110,7 @@ def load_diarization_pipeline():
     # Use your Hugging Face token here
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
     return pipeline
-
+    
 # Streamlit app
 st.title("Audio Transcription and Sentiment Analysis App")
 
@@ -158,42 +129,42 @@ if st.button('Run Sentiment Analysis'):
     if input_type == "Text" and conversation:
         # Process the text input
         messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
-    
-        # Limit processing of large conversations
-        MAX_MESSAGES = 30
+
+        # Limit processing of large conversations (for memory optimization)
+        MAX_MESSAGES = 20  # Only process up to 20 messages at once
         if len(messages) > MAX_MESSAGES:
-            st.warning(f"Only analyzing the first {MAX_MESSAGES} messages.")
+            st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
             messages = messages[:MAX_MESSAGES]
-    
-        # Analyze each message for sentiment
-        sentiments = analyze_multilingual_sentiment(messages)
-    
+
+        # Analyze each message for sentiment in batches
+        sentiments = batch_analyze_sentiments(messages)
+
         # Create structured data
         results = []
-        for i, sentiment in enumerate(sentiments):
-            msg = messages[i]
+        for i, msg in enumerate(messages):
+            # Split each message into speaker and content
             if ": " in msg:
                 speaker, content = msg.split(": ", 1)
             else:
                 speaker, content = "Unknown", msg
-            
+
+            sentiment = sentiments[i]
             results.append({
                 "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 "Speaker": speaker,
-                "Message": sentiment["original_text"],
-                "Language": sentiment["language"],
-                "Sentiment": sentiment["sentiment"],
-                "Score": sentiment["score"]
+                "Message": content,
+                "Sentiment": sentiment["label"],
+                "Score": round(sentiment["score"], 2)
             })
-    
+
         # Convert the results into a DataFrame
         df = pd.DataFrame(results)
         styled_df = df.style.apply(style_table, axis=1)
-    
+
         # Display the DataFrame
         st.write("Conversation with Sentiment Labels:")
         st.dataframe(styled_df)
-    
+
         # Plot sentiment over time using Plotly
         fig = px.line(
             df, 
@@ -205,7 +176,7 @@ if st.button('Run Sentiment Analysis'):
         )
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
-
+        
     elif input_type == "Audio":
         if uploaded_file is not None:
             # Save the uploaded file
@@ -215,11 +186,12 @@ if st.button('Run Sentiment Analysis'):
     
             st.audio(temp_file_path, format='audio/wav')
     
-            # Transcribe the audio using Whisper
-            st.write("Transcribing audio using Whisper...")
+            # Transcribe and translate audio using Whisper
+            st.write("Transcribing and translating audio using Whisper...")
+            
             try:
                 whisper_model = load_whisper_model()
-                result = whisper_model.transcribe(temp_file_path, word_timestamps=True)
+                result = whisper_model.transcribe(temp_file_path, task="translate", word_timestamps=True)
                 transcription = result["text"]
                 segments = result.get("segments", [])
                 word_timestamps = [
@@ -227,9 +199,10 @@ if st.button('Run Sentiment Analysis'):
                     for segment in segments for word in segment["words"]
                 ]
             except Exception as e:
-                st.error(f"Whisper transcription failed: {str(e)}")
+                st.error(f"Whisper transcription and translation failed: {str(e)}")
                 os.remove(temp_file_path)
                 st.stop()
+
     
             # Diarize audio using PyAnnote
             st.write("Performing speaker diarization...")
@@ -241,18 +214,17 @@ if st.button('Run Sentiment Analysis'):
             sentences = split_into_sentences(transcription)
             sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
 
+    
             # Analyze sentiment
             st.write("Analyzing sentiment...")
             messages = [s["text"] for s in sentences_with_speakers]
-            sentiments = analyze_multilingual_sentiment(messages)
-            
+            sentiments = batch_analyze_sentiments(messages)
+    
             # Combine everything into a final DataFrame
             for i, sentiment in enumerate(sentiments):
-                sentences_with_speakers[i]["Sentiment"] = sentiment["sentiment"]
-                sentences_with_speakers[i]["Score"] = sentiment["score"]
-                sentences_with_speakers[i]["Language"] = sentiment["language"]
-
-
+                sentences_with_speakers[i]["Sentiment"] = sentiment["label"]
+                sentences_with_speakers[i]["Score"] = round(sentiment["score"], 2)
+    
             final_df = pd.DataFrame(sentences_with_speakers)
     
             # Display results
