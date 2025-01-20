@@ -186,39 +186,52 @@ if st.button('Run Sentiment Analysis'):
     
             st.audio(temp_file_path, format='audio/wav')
     
-            # Transcribe the audio using Whisper
-            st.write("Transcribing audio using Whisper...")
+            # Transcribe audio and translate if necessary, keeping original language in output
+            st.write("Transcribing and translating audio using Whisper...")
+            
             try:
                 whisper_model = load_whisper_model()
-    
-                # Transcribe in the original language
-                result_transcription = whisper_model.transcribe(temp_file_path, task="transcribe", word_timestamps=True)
-                transcription = result_transcription["text"]
-                segments = result_transcription.get("segments", [])
+                result = whisper_model.transcribe(temp_file_path, word_timestamps=True)
+                transcription = result["text"]
+                segments = result.get("segments", [])
                 word_timestamps = [
                     {"word": word["word"].strip(), "start": word["start"], "end": word["end"]}
                     for segment in segments for word in segment["words"]
                 ]
-    
-                # Translate to English
-                st.write("Translating transcription to English...")
-                result_translation = whisper_model.transcribe(temp_file_path, task="translate")
-                translation = result_translation["text"]
-    
+            
+                # Check if transcription is in a non-English language and translate if necessary
+                detected_language = result["language"]  # Whisper's detected language
+                if detected_language != "en":
+                    st.write(f"Detected language: {detected_language}. Translating to English...")
+                    translated_text = whisper_model.transcribe(temp_file_path, task="translate", word_timestamps=True)["text"]
+                else:
+                    translated_text = transcription  # No translation needed for English audio
+            
             except Exception as e:
-                st.error(f"Whisper transcription/translation failed: {str(e)}")
+                st.error(f"Whisper transcription failed: {str(e)}")
                 os.remove(temp_file_path)
                 st.stop()
-    
+            
+            # Show both original and translated texts
+            st.write("Original Transcription:")
+            st.write(transcription)
+            
+            if detected_language != "en":
+                st.write("Translated Text:")
+                st.write(translated_text)
+            else:
+                st.write("No translation was needed as the audio was in English.")
+
             # Diarize audio using PyAnnote
             st.write("Performing speaker diarization...")
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
     
             # Align sentences with timestamps and speakers
-            st.write("Aligning sentences with speakers...")
+            st.write("Analyzing timestamps...")
             sentences = split_into_sentences(transcription)
             sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
+
     
             # Analyze sentiment
             st.write("Analyzing sentiment...")
@@ -227,11 +240,8 @@ if st.button('Run Sentiment Analysis'):
     
             # Combine everything into a final DataFrame
             for i, sentiment in enumerate(sentiments):
-                sentences_with_speakers[i]["Original Text"] = sentences_with_speakers[i]["text"]
-                sentences_with_speakers[i]["Translated Text"] = translation
-                sentences_with_speakers[i]["Sentiment"] = sentiment["sentiment"]
-                sentences_with_speakers[i]["Score"] = sentiment["score"]
-                sentences_with_speakers[i]["Language"] = sentiment["language"]
+                sentences_with_speakers[i]["Sentiment"] = sentiment["label"]
+                sentences_with_speakers[i]["Score"] = round(sentiment["score"], 2)
     
             final_df = pd.DataFrame(sentences_with_speakers)
     
