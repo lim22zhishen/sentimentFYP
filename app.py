@@ -223,7 +223,7 @@ if st.button('Run Sentiment Analysis'):
             # Analyze sentiment
             st.write("Analyzing sentiment...")
             messages = [s["text"] for s in sentences_with_speakers]
-            sentiments = analyze_multilingual_sentiment(messages)
+            sentiments = batch_analyze_sentiments(messages)
     
             # Combine everything into a final DataFrame
             for i, sentiment in enumerate(sentiments):
