@@ -9,6 +9,7 @@ import ffmpeg
 import re
 import math
 from pyannote.audio import Pipeline
+import torch
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
@@ -109,6 +110,7 @@ def load_whisper_model():
 def load_diarization_pipeline():
     # Use your Hugging Face token here
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
+    pipeline.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return pipeline
     
 # Streamlit app
@@ -186,23 +188,29 @@ if st.button('Run Sentiment Analysis'):
     
             st.audio(temp_file_path, format='audio/wav')
     
-            # Transcribe and translate audio using Whisper
-            st.write("Transcribing and translating audio using Whisper...")
-            
+            # Transcribe the audio using Whisper
+            st.write("Transcribing audio using Whisper...")
             try:
                 whisper_model = load_whisper_model()
-                result = whisper_model.transcribe(temp_file_path, task="translate", word_timestamps=True)
-                transcription = result["text"]
-                segments = result.get("segments", [])
+    
+                # Transcribe in the original language
+                result_transcription = whisper_model.transcribe(temp_file_path, task="transcribe", word_timestamps=True)
+                transcription = result_transcription["text"]
+                segments = result_transcription.get("segments", [])
                 word_timestamps = [
                     {"word": word["word"].strip(), "start": word["start"], "end": word["end"]}
                     for segment in segments for word in segment["words"]
                 ]
+    
+                # Translate to English
+                st.write("Translating transcription to English...")
+                result_translation = whisper_model.transcribe(temp_file_path, task="translate")
+                translation = result_translation["text"]
+    
             except Exception as e:
-                st.error(f"Whisper transcription and translation failed: {str(e)}")
+                st.error(f"Whisper transcription/translation failed: {str(e)}")
                 os.remove(temp_file_path)
                 st.stop()
-
     
             # Diarize audio using PyAnnote
             st.write("Performing speaker diarization...")
@@ -210,20 +218,22 @@ if st.button('Run Sentiment Analysis'):
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
     
             # Align sentences with timestamps and speakers
-            st.write("Analyzing timestamps...")
+            st.write("Aligning sentences with speakers...")
             sentences = split_into_sentences(transcription)
             sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
-
     
             # Analyze sentiment
             st.write("Analyzing sentiment...")
             messages = [s["text"] for s in sentences_with_speakers]
-            sentiments = batch_analyze_sentiments(messages)
+            sentiments = analyze_multilingual_sentiment(messages)
     
             # Combine everything into a final DataFrame
             for i, sentiment in enumerate(sentiments):
-                sentences_with_speakers[i]["Sentiment"] = sentiment["label"]
-                sentences_with_speakers[i]["Score"] = round(sentiment["score"], 2)
+                sentences_with_speakers[i]["Original Text"] = sentences_with_speakers[i]["text"]
+                sentences_with_speakers[i]["Translated Text"] = translation
+                sentences_with_speakers[i]["Sentiment"] = sentiment["sentiment"]
+                sentences_with_speakers[i]["Score"] = sentiment["score"]
+                sentences_with_speakers[i]["Language"] = sentiment["language"]
     
             final_df = pd.DataFrame(sentences_with_speakers)
     
