@@ -211,16 +211,7 @@ if st.button('Run Sentiment Analysis'):
                 st.error(f"Whisper transcription failed: {str(e)}")
                 os.remove(temp_file_path)
                 st.stop()
-            
-            # Show both original and translated texts
-            st.write("Original Transcription:")
-            st.write(transcription)
-            
-            if detected_language != "en":
-                st.write("Translated Text:")
-                st.write(translated_text)
-            else:
-                st.write("No translation was needed as the audio was in English.")
+        
 
             # Diarize audio using PyAnnote
             st.write("Performing speaker diarization...")
@@ -239,28 +230,53 @@ if st.button('Run Sentiment Analysis'):
             sentiments = batch_analyze_sentiments(messages)
     
             # Combine everything into a final DataFrame
+            # Process sentences with the original and translated texts
+            results = []
             for i, sentiment in enumerate(sentiments):
-                sentences_with_speakers[i]["Sentiment"] = sentiment["label"]
-                sentences_with_speakers[i]["Score"] = round(sentiment["score"], 2)
-    
-            final_df = pd.DataFrame(sentences_with_speakers)
-    
-            # Display results
-            st.write("Speaker-Diarized Sentiment Analysis:")
-            styled_df = final_df.style.apply(style_table, axis=1)
+                msg = messages[i]
+                if ": " in msg:
+                    speaker, content = msg.split(": ", 1)
+                else:
+                    speaker, content = "Unknown", msg
+                
+                # Add both original and translated text to the DataFrame
+                if detected_language != "en":
+                    translated_content = translated_text.split('\n')[i]  # Split translation to match each sentence
+                else:
+                    translated_content = content  # No translation for English
+                
+                results.append({
+                    "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "Speaker": speaker,
+                    "Original Text": sentiment["original_text"],  # Original in detected language
+                    "Translated Text": translated_content,  # Translated if necessary
+                    "Language": sentiment["language"],
+                    "Sentiment": sentiment["sentiment"],
+                    "Score": sentiment["score"]
+                })
+            
+            # Convert the results into a DataFrame
+            df = pd.DataFrame(results)
+            
+            # Styling for sentiment-based coloring
+            styled_df = df.style.apply(style_table, axis=1)
+            
+            # Display the table
+            st.write("Conversation with Sentiment Labels and Translations:")
             st.dataframe(styled_df)
-    
-            # Visualization
+            
+            # Visualization: Sentiment trend over time
             fig = px.line(
-                final_df,
-                x='start',
-                y='Score',
-                color='speaker',
-                title="Sentiment Score Over Time by Speaker",
+                df, 
+                x='Timestamp', 
+                y='Score', 
+                color='Sentiment', 
+                title="Sentiment Score Over Time", 
                 markers=True
             )
-            fig.update_layout(xaxis_title="Time (Seconds)", yaxis_title="Sentiment Score")
+            fig.update_traces(marker=dict(size=10))
             st.plotly_chart(fig)
+
     
             # Clean up
             os.remove(temp_file_path)
