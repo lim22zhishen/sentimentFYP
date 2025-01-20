@@ -238,21 +238,21 @@ if st.button('Run Sentiment Analysis'):
                     speaker, content = msg.split(": ", 1)
                 else:
                     speaker, content = "Unknown", msg
-                
+            
                 # Add both original and translated text to the DataFrame
                 if detected_language != "en":
                     translated_content = translated_text.split('\n')[i]  # Split translation to match each sentence
                 else:
                     translated_content = content  # No translation for English
-                
+            
                 results.append({
                     "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     "Speaker": speaker,
-                    "Original Text": sentiment["original_text"],  # Original in detected language
+                    "Original Text": content,  # Original text in the detected language
                     "Translated Text": translated_content,  # Translated if necessary
-                    "Language": sentiment["language"],
-                    "Sentiment": sentiment["sentiment"],
-                    "Score": sentiment["score"]
+                    "Language": detected_language,  # Detected language (whether English or not)
+                    "Sentiment": sentiment["label"],  # Sentiment from batch analyze
+                    "Score": round(sentiment["score"], 2)  # Score for sentiment
                 })
             
             # Convert the results into a DataFrame
@@ -277,7 +277,7 @@ if st.button('Run Sentiment Analysis'):
             fig.update_traces(marker=dict(size=10))
             st.plotly_chart(fig)
 
-    
+
             # Clean up
             os.remove(temp_file_path)
         else:
