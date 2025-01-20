@@ -9,7 +9,6 @@ import ffmpeg
 import re
 import math
 from pyannote.audio import Pipeline
-import torch
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 
@@ -110,7 +109,6 @@ def load_whisper_model():
 def load_diarization_pipeline():
     # Use your Hugging Face token here
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=HUGGINGFACE_TOKEN)
-    pipeline.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return pipeline
     
 # Streamlit app
