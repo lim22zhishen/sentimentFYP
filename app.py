@@ -256,9 +256,6 @@ if st.button('Run Sentiment Analysis'):
         if translation:
             st.write("English Translation:")
             st.text_area("Translation", translation, height=200)
-            # Choose which text to use for further analysis
-            use_translation = st.checkbox("Use translated text for sentiment analysis", value=True)
-            text_for_analysis = translation if use_translation else transcription
         else:
             text_for_analysis = transcription
 
