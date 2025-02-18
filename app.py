@@ -44,29 +44,34 @@ def diarize_audio(diarization_pipeline, audio_file):
         })
     return speaker_segments
 
-# Function to perform transcription using OpenAI Whisper API
+# Function to perform transcription using OpenAI Whisper API with updated client
 def transcribe_with_openai(audio_file_path):
     with open(audio_file_path, "rb") as audio_file:
-        response = openai.Audio.transcribe(
+        response = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            response_format="json",
-            api_key=OPENAI_API_KEY
+            response_format="verbose_json"
         )
-    # Return just the text if no timestamps are available in the response
-    if "segments" in response:
-        # Extract word timestamps if available
-        word_timestamps = []
-        for segment in response["segments"]:
-            if "words" in segment:
-                for word in segment["words"]:
+    
+    # Extract word-level timestamps if available
+    word_timestamps = []
+    
+    # Check if the response has segments with word-level timestamps
+    if hasattr(response, 'segments') and response.segments:
+        for segment in response.segments:
+            if hasattr(segment, 'words'):
+                for word in segment.words:
                     word_timestamps.append({
-                        "word": word["word"],
-                        "start": word["start"],
-                        "end": word["end"]
+                        "word": word.word,
+                        "start": word.start,
+                        "end": word.end
                     })
-        return response["text"], response.get("language", "en"), word_timestamps
-    return response["text"], response.get("language", "en"), []
+    
+    # Get the transcription text and language
+    transcription = response.text
+    language = getattr(response, 'language', 'en')
+    
+    return transcription, language, word_timestamps
 
 # Function to split transcription into sentences
 def split_into_sentences(transcription):
