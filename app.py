@@ -5,12 +5,17 @@ from transformers import pipeline
 import pandas as pd
 import plotly.express as px
 import openai
+from openai import OpenAI
 import re
 from pyannote.audio import Pipeline
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 OPENAI_API_KEY = st.secrets["keys"]
 openai.api_key = OPENAI_API_KEY
+
+# Initialize the OpenAI client with the API key
+client = OpenAI(api_key=OPENAI_API_KEY)
+
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
