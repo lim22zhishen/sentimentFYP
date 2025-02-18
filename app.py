@@ -308,6 +308,11 @@ if st.button('Run Sentiment Analysis'):
         if audio_results['translation']:
             st.write("### English Translation:")
             st.text_area("Translation", audio_results['translation'], height=200)
+            # If the translation exists, use it if it's in English
+            if audio_results['primary_language'] == "en":
+                text_for_analysis = audio_results['translation']
+            else:
+                text_for_analysis = audio_results['transcription']
         else:
             text_for_analysis = audio_results['transcription']
         
