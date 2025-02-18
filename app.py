@@ -5,13 +5,12 @@ from transformers import pipeline
 import pandas as pd
 import plotly.express as px
 import openai
-import ffmpeg
 import re
-import math
 from pyannote.audio import Pipeline
 
 HUGGINGFACE_TOKEN = st.secrets['token']
-openai.api_key = st.secrets["openai_api_key"]
+OPENAI_API_KEY = st.secrets["keys"]
+openai.api_key = OPENAI_API_KEY
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -54,9 +53,28 @@ def transcribe_with_openai(audio_file_path):
             response_format="json",
             api_key=OPENAI_API_KEY
         )
-    return response["text"], response.get("language", "en")
-    
-def align_sentences_with_diarization(sentences, whisper_word_timestamps, speaker_segments):
+    # Return just the text if no timestamps are available in the response
+    if "segments" in response:
+        # Extract word timestamps if available
+        word_timestamps = []
+        for segment in response["segments"]:
+            if "words" in segment:
+                for word in segment["words"]:
+                    word_timestamps.append({
+                        "word": word["word"],
+                        "start": word["start"],
+                        "end": word["end"]
+                    })
+        return response["text"], response.get("language", "en"), word_timestamps
+    return response["text"], response.get("language", "en"), []
+
+# Function to split transcription into sentences
+def split_into_sentences(transcription):
+    # Use regex to split by punctuation, keeping sentence structure
+    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
+    return [sentence.strip() for sentence in sentences if sentence.strip()]
+
+def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
     """
     Align Whisper sentences with PyAnnote speaker diarization results.
     """
@@ -69,11 +87,14 @@ def align_sentences_with_diarization(sentences, whisper_word_timestamps, speaker
         sentence_end = None
 
         # Find the start and end timestamps for the current sentence
-        for word in whisper_word_timestamps:
-            if word['word'] == words[0] and sentence_start is None:
-                sentence_start = word['start']
-            if word['word'] == words[-1]:
-                sentence_end = word['end']
+        # This is a simplification - in practice you might need more sophisticated alignment
+        if word_timestamps:
+            for word_data in word_timestamps:
+                if word_data['word'].strip() in words[0].lower() and sentence_start is None:
+                    sentence_start = word_data['start']
+                if word_data['word'].strip() in words[-1].lower():
+                    sentence_end = word_data['end']
+                    break
 
         # Fallback in case timestamps are missing
         sentence_start = round(sentence_start or 0.0, 2)
@@ -81,10 +102,19 @@ def align_sentences_with_diarization(sentences, whisper_word_timestamps, speaker
 
         # Assign speaker based on diarization timestamps
         speaker = "Unknown"
+        max_overlap = 0
+        
         for segment in speaker_segments:
-            if segment['start'] <= sentence_start <= segment['end']:
-                speaker = segment['speaker']
-                break
+            # Find the segment with maximum overlap with the sentence
+            segment_start, segment_end = segment['start'], segment['end']
+            overlap_start = max(sentence_start, segment_start)
+            overlap_end = min(sentence_end, segment_end)
+            
+            if overlap_end > overlap_start:  # If there's an overlap
+                overlap_duration = overlap_end - overlap_start
+                if overlap_duration > max_overlap:
+                    max_overlap = overlap_duration
+                    speaker = segment['speaker']
 
         aligned_sentences.append({
             "start": sentence_start,
@@ -94,13 +124,6 @@ def align_sentences_with_diarization(sentences, whisper_word_timestamps, speaker
         })
 
     return aligned_sentences
-
-    
-# Function to split transcription into sentences
-def split_into_sentences(transcription):
-    # Use regex to split by punctuation, keeping sentence structure
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
-    return [sentence.strip() for sentence in sentences if sentence.strip()]
 
 # Highlight positive and negative sentiments
 def style_table(row):
@@ -184,55 +207,55 @@ if st.button('Run Sentiment Analysis'):
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
         
-        elif input_type == "Audio" and uploaded_file:
-            temp_file_path = "temp_audio.wav"
-            with open(temp_file_path, "wb") as f:
-                f.write(uploaded_file.read())
-            
-            st.audio(temp_file_path, format="audio/wav")
-            
-            # Transcribe with OpenAI Whisper API
-            st.write("Transcribing with OpenAI Whisper...")
-            transcription, detected_language = transcribe_with_openai(temp_file_path)
-            st.write(f"Detected Language: **{detected_language}**")
-            st.write("Transcription:")
-            st.text_area("Transcript", transcription, height=200)
-    
-            # Speaker Diarization
-            st.write("Performing Speaker Diarization...")
-            diarization_pipeline = load_diarization_pipeline()
-            speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
-    
-            # Align sentences with speakers
-            st.write("Aligning transcription with speaker labels...")
-            sentences = split_into_sentences(transcription)
-            sentences_with_speakers = align_sentences_with_diarization(sentences, speaker_segments)
-    
-            # Sentiment Analysis
-            st.write("Performing Sentiment Analysis...")
-            messages = [s["text"] for s in sentences_with_speakers]
-            sentiments = batch_analyze_sentiments(messages)
-    
-            # Create results DataFrame
-            results = []
-            for i, sentiment in enumerate(sentiments):
-                speaker = sentences_with_speakers[i]["speaker"]
-                results.append({
-                    "Speaker": speaker,
-                    "Text": messages[i],
-                    "Sentiment": sentiment["label"],
-                    "Score": round(sentiment["score"], 2)
-                })
-    
-            df = pd.DataFrame(results)
-            st.write("Final Analysis:")
-            st.dataframe(df)
-    
-            # Sentiment visualization
-            fig = px.line(df, x=df.index, y="Score", color="Sentiment", title="Sentiment Score Over Time")
-            st.plotly_chart(fig)
-    
-            # Clean up
-            os.remove(temp_file_path)
-        else:
-            st.warning("Please provide valid input.")
+    elif input_type == "Audio" and uploaded_file:
+        temp_file_path = "temp_audio.wav"
+        with open(temp_file_path, "wb") as f:
+            f.write(uploaded_file.read())
+        
+        st.audio(temp_file_path, format="audio/wav")
+        
+        # Transcribe with OpenAI Whisper API
+        st.write("Transcribing with OpenAI Whisper...")
+        transcription, detected_language, word_timestamps = transcribe_with_openai(temp_file_path)
+        st.write(f"Detected Language: **{detected_language}**")
+        st.write("Transcription:")
+        st.text_area("Transcript", transcription, height=200)
+
+        # Speaker Diarization
+        st.write("Performing Speaker Diarization...")
+        diarization_pipeline = load_diarization_pipeline()
+        speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
+
+        # Align sentences with speakers
+        st.write("Aligning transcription with speaker labels...")
+        sentences = split_into_sentences(transcription)
+        sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
+
+        # Sentiment Analysis
+        st.write("Performing Sentiment Analysis...")
+        messages = [s["text"] for s in sentences_with_speakers]
+        sentiments = batch_analyze_sentiments(messages)
+
+        # Create results DataFrame
+        results = []
+        for i, sentiment in enumerate(sentiments):
+            speaker = sentences_with_speakers[i]["speaker"]
+            results.append({
+                "Speaker": speaker,
+                "Text": messages[i],
+                "Sentiment": sentiment["label"],
+                "Score": round(sentiment["score"], 2)
+            })
+
+        df = pd.DataFrame(results)
+        st.write("Final Analysis:")
+        st.dataframe(df)
+
+        # Sentiment visualization
+        fig = px.line(df, x=df.index, y="Score", color="Sentiment", title="Sentiment Score Over Time")
+        st.plotly_chart(fig)
+
+        # Clean up
+        os.remove(temp_file_path)
+    else:
+        st.warning("Please provide valid input.")
