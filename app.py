@@ -57,6 +57,21 @@ def diarize_audio(diarization_pipeline, audio_file):
         if not speaker_segments:
             st.warning("No speakers detected. Check if the audio contains clear speech.")
         
+        # After diarization, give option to rename speakers
+        if speaker_segments:
+            st.subheader("Speaker Identification")
+            st.write("The following speakers were detected. You can rename them if needed:")
+            
+            new_mapping = {}
+            for original_label in set(segment["speaker"] for segment in speaker_segments):
+                default_name = original_label
+                new_name = st.text_input(f"Rename {original_label}", value=default_name)
+                new_mapping[original_label] = new_name
+            
+            # Update speaker names if the user modified them
+            for segment in speaker_segments:
+                segment["speaker"] = new_mapping.get(segment["speaker"], segment["speaker"])
+        
         return speaker_segments
 
     except Exception as e:
