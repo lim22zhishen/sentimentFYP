@@ -4,13 +4,14 @@ import datetime
 from transformers import pipeline
 import pandas as pd
 import plotly.express as px
-import whisper
+import openai
 import ffmpeg
 import re
 import math
 from pyannote.audio import Pipeline
 
 HUGGINGFACE_TOKEN = st.secrets['token']
+openai.api_key = st.secrets["openai_api_key"]
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
@@ -44,6 +45,17 @@ def diarize_audio(diarization_pipeline, audio_file):
         })
     return speaker_segments
 
+# Function to perform transcription using OpenAI Whisper API
+def transcribe_with_openai(audio_file_path):
+    with open(audio_file_path, "rb") as audio_file:
+        response = openai.Audio.transcribe(
+            model="whisper-1",
+            file=audio_file,
+            response_format="json",
+            api_key=OPENAI_API_KEY
+        )
+    return response["text"], response.get("language", "en")
+    
 def align_sentences_with_diarization(sentences, whisper_word_timestamps, speaker_segments):
     """
     Align Whisper sentences with PyAnnote speaker diarization results.
@@ -99,11 +111,6 @@ def style_table(row):
     else:
         return [''] * len(row)
                 
-# Load Whisper model
-@st.cache_resource
-def load_whisper_model():
-    return whisper.load_model("large")
-
 # Load PyAnnote diarization pipeline
 @st.cache_resource
 def load_diarization_pipeline():
@@ -177,108 +184,55 @@ if st.button('Run Sentiment Analysis'):
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
         
-    elif input_type == "Audio":
-        if uploaded_file is not None:
-            # Save the uploaded file
+        elif input_type == "Audio" and uploaded_file:
             temp_file_path = "temp_audio.wav"
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.read())
+            
+            st.audio(temp_file_path, format="audio/wav")
+            
+            # Transcribe with OpenAI Whisper API
+            st.write("Transcribing with OpenAI Whisper...")
+            transcription, detected_language = transcribe_with_openai(temp_file_path)
+            st.write(f"Detected Language: **{detected_language}**")
+            st.write("Transcription:")
+            st.text_area("Transcript", transcription, height=200)
     
-            st.audio(temp_file_path, format='audio/wav')
-    
-            # Transcribe audio and translate if necessary, keeping original language in output
-            st.write("Transcribing and translating audio using Whisper...")
-            
-            try:
-                whisper_model = load_whisper_model()
-                result = whisper_model.transcribe(temp_file_path, word_timestamps=True)
-                transcription = result["text"]
-                segments = result.get("segments", [])
-                word_timestamps = [
-                    {"word": word["word"].strip(), "start": word["start"], "end": word["end"]}
-                    for segment in segments for word in segment["words"]
-                ]
-            
-                # Check if transcription is in a non-English language and translate if necessary
-                detected_language = result["language"]  # Whisper's detected language
-                if detected_language != "en":
-                    st.write(f"Detected language: {detected_language}. Translating to English...")
-                    translated_text = whisper_model.transcribe(temp_file_path, task="translate", word_timestamps=True)["text"]
-                else:
-                    translated_text = transcription  # No translation needed for English audio
-            
-            except Exception as e:
-                st.error(f"Whisper transcription failed: {str(e)}")
-                os.remove(temp_file_path)
-                st.stop()
-        
-
-            # Diarize audio using PyAnnote
-            st.write("Performing speaker diarization...")
+            # Speaker Diarization
+            st.write("Performing Speaker Diarization...")
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
     
-            # Align sentences with timestamps and speakers
-            st.write("Analyzing timestamps...")
+            # Align sentences with speakers
+            st.write("Aligning transcription with speaker labels...")
             sentences = split_into_sentences(transcription)
-            sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
-
+            sentences_with_speakers = align_sentences_with_diarization(sentences, speaker_segments)
     
-            # Analyze sentiment
-            st.write("Analyzing sentiment...")
+            # Sentiment Analysis
+            st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
             sentiments = batch_analyze_sentiments(messages)
     
-            # Combine everything into a final DataFrame
-            # Process sentences with the original and translated texts
+            # Create results DataFrame
             results = []
             for i, sentiment in enumerate(sentiments):
-                msg = messages[i]
-                if ": " in msg:
-                    speaker, content = msg.split(": ", 1)
-                else:
-                    speaker, content = "Unknown", msg
-            
-                # Add both original and translated text to the DataFrame
-                if detected_language != "en":
-                    translated_content = translated_text.split('\n')[i]  # Split translation to match each sentence
-                else:
-                    translated_content = content  # No translation for English
-            
+                speaker = sentences_with_speakers[i]["speaker"]
                 results.append({
-                    "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     "Speaker": speaker,
-                    "Original Text": content,  # Original text in the detected language
-                    "Translated Text": translated_content,  # Translated if necessary
-                    "Language": detected_language,  # Detected language (whether English or not)
-                    "Sentiment": sentiment["label"],  # Sentiment from batch analyze
-                    "Score": round(sentiment["score"], 2)  # Score for sentiment
+                    "Text": messages[i],
+                    "Sentiment": sentiment["label"],
+                    "Score": round(sentiment["score"], 2)
                 })
-            
-            # Convert the results into a DataFrame
+    
             df = pd.DataFrame(results)
-            
-            # Styling for sentiment-based coloring
-            styled_df = df.style.apply(style_table, axis=1)
-            
-            # Display the table
-            st.write("Conversation with Sentiment Labels and Translations:")
-            st.dataframe(styled_df)
-            
-            # Visualization: Sentiment trend over time
-            fig = px.line(
-                df, 
-                x='Timestamp', 
-                y='Score', 
-                color='Sentiment', 
-                title="Sentiment Score Over Time", 
-                markers=True
-            )
-            fig.update_traces(marker=dict(size=10))
+            st.write("Final Analysis:")
+            st.dataframe(df)
+    
+            # Sentiment visualization
+            fig = px.line(df, x=df.index, y="Score", color="Sentiment", title="Sentiment Score Over Time")
             st.plotly_chart(fig)
-
-
+    
             # Clean up
             os.remove(temp_file_path)
         else:
-            st.info("Please upload a .wav file to start transcription.")
+            st.warning("Please provide valid input.")
