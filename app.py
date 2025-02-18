@@ -35,26 +35,45 @@ def batch_analyze_sentiments(messages):
 
 def diarize_audio(diarization_pipeline, audio_file):
     """
-    Perform speaker diarization using PyAnnote.
+    Perform speaker diarization using PyAnnote with improved error handling.
     Returns a list of speaker segments (start time, end time, speaker label).
     """
-    diarization_result = diarization_pipeline(audio_file)
-    speaker_segments = []
+    try:
+        diarization_result = diarization_pipeline(audio_file)
+        speaker_segments = []
+        speaker_count = 0
+        
+        # Collect all speaker segments
+        for segment, _, speaker in diarization_result.itertracks(yield_label=True):
+            speaker_segments.append({
+                "start": round(segment.start, 2),
+                "end": round(segment.end, 2),
+                "speaker": speaker
+            })
+            speaker_count = max(speaker_count, int(speaker.split("_")[1]) if "_" in speaker else 0)
+            
+        # If no speakers found, provide detailed information for debugging
+        if not speaker_segments:
+            st.warning("No speakers detected in the audio. Check if the audio contains clear speech.")
+            # Still return empty list to avoid errors in downstream processing
+        else:
+            st.info(f"Successfully identified {speaker_count + 1} speakers.")
+            
+        return speaker_segments
+        
+    except Exception as e:
+        st.error(f"Speaker diarization failed: {str(e)}")
+        # Return a default single speaker for all content to prevent downstream errors
+        return [{"start": 0.0, "end": 1000.0, "speaker": "SPEAKER_0"}]
 
-    for segment, _, speaker in diarization_result.itertracks(yield_label=True):
-        speaker_segments.append({
-            "start": round(segment.start, 2),
-            "end": round(segment.end, 2),
-            "speaker": speaker
-        })
-    return speaker_segments
-
-# Function to perform transcription using OpenAI Whisper API with updated client
-def transcribe_and_translate_with_openai(audio_file_path, target_language="english"):
+def handle_multilanguage_audio(audio_file_path, target_language="english"):
     """
-    Transcribe audio and translate to the target language if needed
+    Handle audio that may contain multiple languages:
+    1. Transcribe using Whisper (which can handle multiple languages)
+    2. Detect language segments if needed
+    3. Translate each segment appropriately
     """
-    # First, transcribe to get original language and content
+    # Initial transcription
     with open(audio_file_path, "rb") as audio_file:
         response = client.audio.transcriptions.create(
             model="whisper-1",
@@ -62,7 +81,10 @@ def transcribe_and_translate_with_openai(audio_file_path, target_language="engli
             response_format="verbose_json"
         )
     
-    # Extract word-level timestamps if available
+    transcription = response.text
+    primary_language = getattr(response, 'language', 'unknown')
+    
+    # Extract word-level timestamps
     word_timestamps = []
     if hasattr(response, 'segments') and response.segments:
         for segment in response.segments:
@@ -74,30 +96,53 @@ def transcribe_and_translate_with_openai(audio_file_path, target_language="engli
                         "end": word.end
                     })
     
-    # Get the transcription text and language
-    transcription = response.text
-    original_language = getattr(response, 'language', 'unknown')
+    # Analyze for potential multiple languages (can be enhanced with more sophisticated detection)
+    try:
+        # Use GPT to detect if there might be multiple languages
+        language_analysis = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Analyze if this text contains multiple languages. If it does, identify which languages and approximately which parts are in which language."},
+                {"role": "user", "content": transcription}
+            ]
+        )
+        language_analysis_result = language_analysis.choices[0].message.content
+        
+        # Check if multiple languages were detected
+        multiple_languages_detected = "multiple languages" in language_analysis_result.lower() or "different languages" in language_analysis_result.lower()
+        
+        if multiple_languages_detected:
+            st.warning("Multiple languages may have been detected in this audio.")
+            st.info(language_analysis_result)
+    except Exception as e:
+        st.warning(f"Language analysis failed: {e}")
+        multiple_languages_detected = False
     
-    # Only translate if the original language is not English
-    if original_language != 'en':
+    # Translate if needed
+    translated_text = None
+    if primary_language != 'en':
         try:
-            # Use OpenAI for translation
+            translation_prompt = "Translate the following text to English. If there are multiple languages present, identify each language and translate all of it."
             translation_response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4",  # Using a more powerful model for multilingual translation
                 messages=[
-                    {"role": "system", "content": f"Translate the following text from {original_language} to {target_language}."},
+                    {"role": "system", "content": translation_prompt},
                     {"role": "user", "content": transcription}
                 ]
             )
             translated_text = translation_response.choices[0].message.content
-            return transcription, original_language, word_timestamps, translated_text
         except Exception as e:
             st.warning(f"Translation failed: {e}")
-            return transcription, original_language, word_timestamps, None
-    else:
-        # If already in English, no translation needed
-        return transcription, original_language, word_timestamps, None
-
+    
+    return {
+        "transcription": transcription,
+        "primary_language": primary_language,
+        "multiple_languages_detected": multiple_languages_detected,
+        "language_analysis": language_analysis_result if multiple_languages_detected else None,
+        "translation": translated_text,
+        "word_timestamps": word_timestamps
+    }
+    
 # Function to split transcription into sentences
 def split_into_sentences(transcription):
     # Use regex to split by punctuation, keeping sentence structure
@@ -244,56 +289,91 @@ if st.button('Run Sentiment Analysis'):
         
         st.audio(temp_file_path, format="audio/wav")
         
-        # Transcribe and translate with OpenAI Whisper API
-        st.write("Transcribing with OpenAI Whisper...")
-        transcription, detected_language, word_timestamps, translation = transcribe_and_translate_with_openai(temp_file_path)
+        # Process audio with enhanced multilanguage capability
+        st.write("Processing audio...")
+        audio_results = handle_multilanguage_audio(temp_file_path)
         
-        st.write(f"Detected Language: **{detected_language}**")
-        st.write("Original Transcription:")
-        st.text_area("Transcript", transcription, height=200)
+        # Display language information
+        st.write(f"Primary Language: **{audio_results['primary_language']}**")
+        
+        if audio_results['multiple_languages_detected']:
+            st.write("### Multiple Languages Detected")
+            st.write(audio_results['language_analysis'])
+        
+        # Display original transcription
+        st.write("### Original Transcription:")
+        st.text_area("Transcript", audio_results['transcription'], height=200)
         
         # Display translation if available
-        if translation:
-            st.write("English Translation:")
-            st.text_area("Translation", translation, height=200)
+        if audio_results['translation']:
+            st.write("### English Translation:")
+            st.text_area("Translation", audio_results['translation'], height=200)
+            # Choose which text to use for further analysis
+            use_translation = st.checkbox("Use translated text for sentiment analysis", value=True)
+            text_for_analysis = audio_results['translation'] if use_translation else audio_results['transcription']
         else:
-            text_for_analysis = transcription
-
-        # Speaker Diarization
+            text_for_analysis = audio_results['transcription']
+        
+        # Speaker Diarization with improved function
         st.write("Performing Speaker Diarization...")
-        diarization_pipeline = load_diarization_pipeline()
-        speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
-
-        # Align sentences with speakers
-        st.write("Aligning transcription with speaker labels...")
-        sentences = split_into_sentences(transcription)
-        sentences_with_speakers = align_sentences_with_diarization(sentences, word_timestamps, speaker_segments)
-
-        # Sentiment Analysis
-        st.write("Performing Sentiment Analysis...")
-        messages = [s["text"] for s in sentences_with_speakers]
-        sentiments = batch_analyze_sentiments(messages)
-
-        # Create results DataFrame
-        results = []
-        for i, sentiment in enumerate(sentiments):
-            speaker = sentences_with_speakers[i]["speaker"]
-            results.append({
-                "Speaker": speaker,
-                "Text": messages[i],
-                "Sentiment": sentiment["label"],
-                "Score": round(sentiment["score"], 2)
-            })
-
-        df = pd.DataFrame(results)
-        st.write("Final Analysis:")
-        st.dataframe(df)
-
-        # Sentiment visualization
-        fig = px.line(df, x=df.index, y="Score", color="Sentiment", title="Sentiment Score Over Time")
-        st.plotly_chart(fig)
-
+        try:
+            diarization_pipeline = load_diarization_pipeline()
+            speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
+            
+            # Align sentences with speakers
+            st.write("Aligning transcription with speaker labels...")
+            sentences = split_into_sentences(text_for_analysis)
+            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
+            
+            # Display a simple view of who said what
+            st.write("### Speaker Breakdown:")
+            for sentence_data in sentences_with_speakers:
+                st.markdown(f"**{sentence_data['speaker']}**: {sentence_data['text']}")
+            
+            # Sentiment Analysis
+            st.write("Performing Sentiment Analysis...")
+            messages = [s["text"] for s in sentences_with_speakers]
+            sentiments = batch_analyze_sentiments(messages)
+            
+            # Create results DataFrame
+            results = []
+            for i, sentiment in enumerate(sentiments):
+                speaker = sentences_with_speakers[i]["speaker"]
+                results.append({
+                    "Speaker": speaker,
+                    "Text": messages[i],
+                    "Sentiment": sentiment["label"],
+                    "Score": round(sentiment["score"], 2)
+                })
+            
+            df = pd.DataFrame(results)
+            st.write("Final Analysis:")
+            st.dataframe(df)
+            
+            # Sentiment visualization
+            fig = px.line(df, x=df.index, y="Score", color="Speaker", title="Sentiment Score Over Time")
+            st.plotly_chart(fig)
+            
+        except Exception as e:
+            st.error(f"An error occurred during audio processing: {str(e)}")
+            st.write("Attempting sentiment analysis on whole transcript without speaker diarization...")
+            
+            # Fallback: analyze whole transcript
+            sentences = split_into_sentences(text_for_analysis)
+            sentiments = batch_analyze_sentiments(sentences)
+            
+            results = []
+            for i, sentence in enumerate(sentences):
+                sentiment = sentiments[i]
+                results.append({
+                    "Text": sentence,
+                    "Sentiment": sentiment["label"],
+                    "Score": round(sentiment["score"], 2)
+                })
+            
+            df = pd.DataFrame(results)
+            st.write("Basic Sentiment Analysis (without speaker identification):")
+            st.dataframe(df)
+    
         # Clean up
         os.remove(temp_file_path)
-    else:
-        st.warning("Please provide valid input.")
