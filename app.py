@@ -112,7 +112,6 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         multiple_languages_detected = "multiple languages" in language_analysis_result.lower() or "different languages" in language_analysis_result.lower()
         
         if multiple_languages_detected:
-            st.warning("Multiple languages may have been detected in this audio.")
             st.info(language_analysis_result)
     except Exception as e:
         st.warning(f"Language analysis failed: {e}")
@@ -326,11 +325,6 @@ if st.button('Run Sentiment Analysis'):
             st.write("Aligning transcription with speaker labels...")
             sentences = split_into_sentences(text_for_analysis)
             sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
-            
-            # Display a simple view of who said what
-            st.write("### Speaker Breakdown:")
-            for sentence_data in sentences_with_speakers:
-                st.markdown(f"**{sentence_data['speaker']}**: {sentence_data['text']}")
             
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
