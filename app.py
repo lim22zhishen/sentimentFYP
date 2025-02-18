@@ -50,7 +50,11 @@ def diarize_audio(diarization_pipeline, audio_file):
     return speaker_segments
 
 # Function to perform transcription using OpenAI Whisper API with updated client
-def transcribe_with_openai(audio_file_path):
+def transcribe_and_translate_with_openai(audio_file_path, target_language="english"):
+    """
+    Transcribe audio and translate to the target language if needed
+    """
+    # First, transcribe to get original language and content
     with open(audio_file_path, "rb") as audio_file:
         response = client.audio.transcriptions.create(
             model="whisper-1",
@@ -60,8 +64,6 @@ def transcribe_with_openai(audio_file_path):
     
     # Extract word-level timestamps if available
     word_timestamps = []
-    
-    # Check if the response has segments with word-level timestamps
     if hasattr(response, 'segments') and response.segments:
         for segment in response.segments:
             if hasattr(segment, 'words'):
@@ -74,9 +76,27 @@ def transcribe_with_openai(audio_file_path):
     
     # Get the transcription text and language
     transcription = response.text
-    language = getattr(response, 'language', 'en')
+    original_language = getattr(response, 'language', 'unknown')
     
-    return transcription, language, word_timestamps
+    # Only translate if the original language is not English
+    if original_language != 'en':
+        try:
+            # Use OpenAI for translation
+            translation_response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": f"Translate the following text from {original_language} to {target_language}."},
+                    {"role": "user", "content": transcription}
+                ]
+            )
+            translated_text = translation_response.choices[0].message.content
+            return transcription, original_language, word_timestamps, translated_text
+        except Exception as e:
+            st.warning(f"Translation failed: {e}")
+            return transcription, original_language, word_timestamps, None
+    else:
+        # If already in English, no translation needed
+        return transcription, original_language, word_timestamps, None
 
 # Function to split transcription into sentences
 def split_into_sentences(transcription):
@@ -224,12 +244,23 @@ if st.button('Run Sentiment Analysis'):
         
         st.audio(temp_file_path, format="audio/wav")
         
-        # Transcribe with OpenAI Whisper API
+        # Transcribe and translate with OpenAI Whisper API
         st.write("Transcribing with OpenAI Whisper...")
-        transcription, detected_language, word_timestamps = transcribe_with_openai(temp_file_path)
+        transcription, detected_language, word_timestamps, translation = transcribe_and_translate_with_openai(temp_file_path)
+        
         st.write(f"Detected Language: **{detected_language}**")
-        st.write("Transcription:")
+        st.write("Original Transcription:")
         st.text_area("Transcript", transcription, height=200)
+        
+        # Display translation if available
+        if translation:
+            st.write("English Translation:")
+            st.text_area("Translation", translation, height=200)
+            # Choose which text to use for further analysis
+            use_translation = st.checkbox("Use translated text for sentiment analysis", value=True)
+            text_for_analysis = translation if use_translation else transcription
+        else:
+            text_for_analysis = transcription
 
         # Speaker Diarization
         st.write("Performing Speaker Diarization...")
