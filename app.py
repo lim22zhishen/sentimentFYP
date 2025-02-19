@@ -42,7 +42,11 @@ def diarize_audio(diarization_pipeline, audio_file):
         diarization_result = diarization_pipeline(audio_file)
         speaker_segments = []
         speaker_count = 0
-        
+
+        print("\n🔍 RAW DIARIZATION OUTPUT:\n")
+        for segment, _, speaker in diarization_result.itertracks(yield_label=True):
+            print(f"⏱ {segment.start:.2f}s - {segment.end:.2f}s: {speaker}")
+            
         # Collect all speaker segments
         for segment, _, speaker in diarization_result.itertracks(yield_label=True):
             speaker_segments.append({
