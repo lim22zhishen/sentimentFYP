@@ -163,11 +163,11 @@ def split_into_sentences(transcription):
 
 def align_sentences_with_diarization(original_sentences, translated_sentences, word_timestamps, speaker_segments):
     """
-    Align translated sentences with the original audio's speaker diarization results.
+    Align sentences with speaker diarization results, handling translations properly.
     
     Parameters:
     - original_sentences: List of sentences from original transcription
-    - translated_sentences: List of translated sentences (if any)
+    - translated_sentences: List of translated sentences (or None if no translation)
     - word_timestamps: Word-level timestamps from the original transcription
     - speaker_segments: Speaker diarization segments
     
@@ -176,64 +176,104 @@ def align_sentences_with_diarization(original_sentences, translated_sentences, w
     """
     aligned_sentences = []
     
-    # If we have translations, we need to map them back to original timestamps
-    if translated_sentences and len(translated_sentences) != len(original_sentences):
-        # This is a simplification - in practice, perfect alignment might be difficult
-        # Here we're assuming roughly equivalent sentence structure
-        st.warning("Translation may alter sentence boundaries - speaker assignment is approximate")
-        
-        # Distribute translated sentences based on relative position
-        sentences_to_align = translated_sentences
-        ratio = len(original_sentences) / len(translated_sentences)
-    else:
-        # No translation or 1:1 mapping
-        sentences_to_align = translated_sentences if translated_sentences else original_sentences
-        ratio = 1.0
+    # Determine which sentences to use for display/analysis
+    sentences_to_align = translated_sentences if translated_sentences else original_sentences
     
-    # Now align each sentence
-    for i, sentence in enumerate(sentences_to_align):
-        # Map back to original timestamp position
-        original_index = min(int(i * ratio), len(original_sentences) - 1)
+    # If we have translations with different sentence counts, we need mapping
+    if translated_sentences and len(translated_sentences) != len(original_sentences):
+        st.warning("Translation resulted in different sentence boundaries - speaker assignment is approximate")
+        ratio = len(original_sentences) / max(1, len(translated_sentences))
         
-        # Get timestamps from original transcription
-        words = original_sentences[original_index].split()
-        sentence_start = None
-        sentence_end = None
-        
-        # Find timestamps for the original sentence
-        if word_timestamps:
-            for word_data in word_timestamps:
-                if word_data['word'].strip() in words[0].lower() and sentence_start is None:
-                    sentence_start = word_data['start']
-                if word_data['word'].strip() in words[-1].lower():
-                    sentence_end = word_data['end']
-                    break
-        
-        # Fallback
-        sentence_start = round(sentence_start or 0.0, 2)
-        sentence_end = round(sentence_end or sentence_start + 5, 2)
-        
-        # Find best speaker for this time segment
-        speaker = "Unknown"
-        max_overlap = 0
-        
-        for segment in speaker_segments:
-            segment_start, segment_end = segment['start'], segment['end']
-            overlap_start = max(sentence_start, segment_start)
-            overlap_end = min(sentence_end, segment_end)
+        # Now align each translated sentence
+        for i, sentence in enumerate(sentences_to_align):
+            # Map back to original timestamp position
+            original_index = min(int(i * ratio), len(original_sentences) - 1)
             
-            if overlap_end > overlap_start:
-                overlap_duration = overlap_end - overlap_start
-                if overlap_duration > max_overlap:
-                    max_overlap = overlap_duration
-                    speaker = segment['speaker']
-        
-        aligned_sentences.append({
-            "start": sentence_start,
-            "end": sentence_end,
-            "text": sentence,
-            "speaker": speaker
-        })
+            # Use original sentence for timestamp lookup
+            words = original_sentences[original_index].split()
+            sentence_start = None
+            sentence_end = None
+            
+            # Find timestamps using the original words
+            if word_timestamps:
+                for word_data in word_timestamps:
+                    word = word_data['word'].strip().lower()
+                    if any(word in w.lower() for w in words[:2]) and sentence_start is None:
+                        sentence_start = word_data['start']
+                    if any(word in w.lower() for w in words[-2:]):
+                        sentence_end = word_data['end']
+                        break
+            
+            # Fallback timestamps
+            sentence_start = round(sentence_start or 0.0, 2)
+            sentence_end = round(sentence_end or sentence_start + 5, 2)
+            
+            # Find most likely speaker (maximum overlap)
+            speaker = "Unknown"
+            max_overlap = 0
+            
+            for segment in speaker_segments:
+                segment_start, segment_end = segment['start'], segment['end']
+                overlap_start = max(sentence_start, segment_start)
+                overlap_end = min(sentence_end, segment_end)
+                
+                if overlap_end > overlap_start:
+                    overlap_duration = overlap_end - overlap_start
+                    if overlap_duration > max_overlap:
+                        max_overlap = overlap_duration
+                        speaker = segment['speaker']
+            
+            aligned_sentences.append({
+                "start": sentence_start,
+                "end": sentence_end,
+                "text": sentence,
+                "speaker": speaker,
+                "confidence": max_overlap / (sentence_end - sentence_start)  # Add confidence score
+            })
+    else:
+        # Simple 1:1 alignment (no translation or same sentence count)
+        for i, sentence in enumerate(sentences_to_align):
+            # Use matching original sentence for timestamps
+            words = original_sentences[i].split()
+            sentence_start = None
+            sentence_end = None
+            
+            # Find timestamps
+            if word_timestamps:
+                for word_data in word_timestamps:
+                    word = word_data['word'].strip().lower()
+                    if any(word in w.lower() for w in words[:2]) and sentence_start is None:
+                        sentence_start = word_data['start']
+                    if any(word in w.lower() for w in words[-2:]):
+                        sentence_end = word_data['end']
+                        break
+            
+            # Fallback
+            sentence_start = round(sentence_start or 0.0, 2)
+            sentence_end = round(sentence_end or sentence_start + 5, 2)
+            
+            # Assign speaker
+            speaker = "Unknown"
+            max_overlap = 0
+            
+            for segment in speaker_segments:
+                segment_start, segment_end = segment['start'], segment['end']
+                overlap_start = max(sentence_start, segment_start)
+                overlap_end = min(sentence_end, segment_end)
+                
+                if overlap_end > overlap_start:
+                    overlap_duration = overlap_end - overlap_start
+                    if overlap_duration > max_overlap:
+                        max_overlap = overlap_duration
+                        speaker = segment['speaker']
+            
+            aligned_sentences.append({
+                "start": sentence_start,
+                "end": sentence_end,
+                "text": sentence,
+                "speaker": speaker,
+                "confidence": max_overlap / max(0.1, (sentence_end - sentence_start))  # Add confidence score
+            })
     
     return aligned_sentences
 
