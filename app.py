@@ -161,120 +161,55 @@ def split_into_sentences(transcription):
     sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
     return [sentence.strip() for sentence in sentences if sentence.strip()]
 
-def align_sentences_with_diarization(original_sentences, translated_sentences, word_timestamps, speaker_segments):
+def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
     """
-    Align sentences with speaker diarization results, handling translations properly.
-    
-    Parameters:
-    - original_sentences: List of sentences from original transcription
-    - translated_sentences: List of translated sentences (or None if no translation)
-    - word_timestamps: Word-level timestamps from the original transcription
-    - speaker_segments: Speaker diarization segments
-    
-    Returns:
-    - List of aligned sentences with speaker information
+    Align Whisper sentences with PyAnnote speaker diarization results.
     """
     aligned_sentences = []
-    
-    # Determine which sentences to use for display/analysis
-    sentences_to_align = translated_sentences if translated_sentences else original_sentences
-    
-    # If we have translations with different sentence counts, we need mapping
-    if translated_sentences and len(translated_sentences) != len(original_sentences):
-        st.warning("Translation resulted in different sentence boundaries - speaker assignment is approximate")
-        ratio = len(original_sentences) / max(1, len(translated_sentences))
+
+    # Loop through sentences and estimate speaker
+    for sentence in sentences:
+        words = sentence.split()
+        sentence_start = None
+        sentence_end = None
+
+        # Find the start and end timestamps for the current sentence
+        # This is a simplification - in practice you might need more sophisticated alignment
+        if word_timestamps:
+            for word_data in word_timestamps:
+                if word_data['word'].strip() in words[0].lower() and sentence_start is None:
+                    sentence_start = word_data['start']
+                if word_data['word'].strip() in words[-1].lower():
+                    sentence_end = word_data['end']
+                    break
+
+        # Fallback in case timestamps are missing
+        sentence_start = round(sentence_start or 0.0, 2)
+        sentence_end = round(sentence_end or sentence_start + 5, 2)
+
+        # Assign speaker based on diarization timestamps
+        speaker = "Unknown"
+        max_overlap = 0
         
-        # Now align each translated sentence
-        for i, sentence in enumerate(sentences_to_align):
-            # Map back to original timestamp position
-            original_index = min(int(i * ratio), len(original_sentences) - 1)
+        for segment in speaker_segments:
+            # Find the segment with maximum overlap with the sentence
+            segment_start, segment_end = segment['start'], segment['end']
+            overlap_start = max(sentence_start, segment_start)
+            overlap_end = min(sentence_end, segment_end)
             
-            # Use original sentence for timestamp lookup
-            words = original_sentences[original_index].split()
-            sentence_start = None
-            sentence_end = None
-            
-            # Find timestamps using the original words
-            if word_timestamps:
-                for word_data in word_timestamps:
-                    word = word_data['word'].strip().lower()
-                    if any(word in w.lower() for w in words[:2]) and sentence_start is None:
-                        sentence_start = word_data['start']
-                    if any(word in w.lower() for w in words[-2:]):
-                        sentence_end = word_data['end']
-                        break
-            
-            # Fallback timestamps
-            sentence_start = round(sentence_start or 0.0, 2)
-            sentence_end = round(sentence_end or sentence_start + 5, 2)
-            
-            # Find most likely speaker (maximum overlap)
-            speaker = "Unknown"
-            max_overlap = 0
-            
-            for segment in speaker_segments:
-                segment_start, segment_end = segment['start'], segment['end']
-                overlap_start = max(sentence_start, segment_start)
-                overlap_end = min(sentence_end, segment_end)
-                
-                if overlap_end > overlap_start:
-                    overlap_duration = overlap_end - overlap_start
-                    if overlap_duration > max_overlap:
-                        max_overlap = overlap_duration
-                        speaker = segment['speaker']
-            
-            aligned_sentences.append({
-                "start": sentence_start,
-                "end": sentence_end,
-                "text": sentence,
-                "speaker": speaker,
-                "confidence": max_overlap / (sentence_end - sentence_start)  # Add confidence score
-            })
-    else:
-        # Simple 1:1 alignment (no translation or same sentence count)
-        for i, sentence in enumerate(sentences_to_align):
-            # Use matching original sentence for timestamps
-            words = original_sentences[i].split()
-            sentence_start = None
-            sentence_end = None
-            
-            # Find timestamps
-            if word_timestamps:
-                for word_data in word_timestamps:
-                    word = word_data['word'].strip().lower()
-                    if any(word in w.lower() for w in words[:2]) and sentence_start is None:
-                        sentence_start = word_data['start']
-                    if any(word in w.lower() for w in words[-2:]):
-                        sentence_end = word_data['end']
-                        break
-            
-            # Fallback
-            sentence_start = round(sentence_start or 0.0, 2)
-            sentence_end = round(sentence_end or sentence_start + 5, 2)
-            
-            # Assign speaker
-            speaker = "Unknown"
-            max_overlap = 0
-            
-            for segment in speaker_segments:
-                segment_start, segment_end = segment['start'], segment['end']
-                overlap_start = max(sentence_start, segment_start)
-                overlap_end = min(sentence_end, segment_end)
-                
-                if overlap_end > overlap_start:
-                    overlap_duration = overlap_end - overlap_start
-                    if overlap_duration > max_overlap:
-                        max_overlap = overlap_duration
-                        speaker = segment['speaker']
-            
-            aligned_sentences.append({
-                "start": sentence_start,
-                "end": sentence_end,
-                "text": sentence,
-                "speaker": speaker,
-                "confidence": max_overlap / max(0.1, (sentence_end - sentence_start))  # Add confidence score
-            })
-    
+            if overlap_end > overlap_start:  # If there's an overlap
+                overlap_duration = overlap_end - overlap_start
+                if overlap_duration > max_overlap:
+                    max_overlap = overlap_duration
+                    speaker = segment['speaker']
+
+        aligned_sentences.append({
+            "start": sentence_start,
+            "end": sentence_end,
+            "text": sentence,
+            "speaker": speaker
+        })
+
     return aligned_sentences
 
 # Highlight positive and negative sentiments
@@ -382,14 +317,14 @@ if st.button('Run Sentiment Analysis'):
         st.text_area("Transcript", audio_results['transcription'], height=200)
         
         # Display translation if available
-        original_sentences = split_into_sentences(audio_results['transcription'])
-        translated_sentences = None
-        
         if audio_results['translation']:
             st.write("### English Translation:")
             st.text_area("Translation", audio_results['translation'], height=200)
-            translated_sentences = split_into_sentences(audio_results['translation'])
-            text_for_analysis = audio_results['translation']
+            # If the translation exists, use it if it's in English
+            if audio_results['primary_language'] == "en":
+                text_for_analysis = audio_results['translation']
+            else:
+                text_for_analysis = audio_results['transcription']
         else:
             text_for_analysis = audio_results['transcription']
         
@@ -399,31 +334,10 @@ if st.button('Run Sentiment Analysis'):
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
             
-            # Allow users to rename speakers
-            st.subheader("Speaker Identification")
-            st.write("The following speakers were detected. You can rename them if needed:")
-            
-            unique_speakers = list(set(segment["speaker"] for segment in speaker_segments))
-            new_mapping = {}
-            
-            for original_label in unique_speakers:
-                default_name = original_label
-                new_name = st.text_input(f"Rename {original_label}", value=default_name)
-                new_mapping[original_label] = new_name
-            
-            # Update speaker names if the user modified them
-            for segment in speaker_segments:
-                segment["speaker"] = new_mapping.get(segment["speaker"], segment["speaker"])
-            
-            # Align sentences with speakers, handling translation properly
+            # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            
-            sentences_with_speakers = align_sentences_with_diarization(
-                original_sentences,
-                translated_sentences,
-                audio_results['word_timestamps'],
-                speaker_segments
-            )
+            sentences = split_into_sentences(text_for_analysis)
+            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
             
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
