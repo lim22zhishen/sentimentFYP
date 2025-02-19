@@ -35,49 +35,36 @@ def batch_analyze_sentiments(messages):
 
 def diarize_audio(diarization_pipeline, audio_file):
     """
-    Perform speaker diarization using PyAnnote with improved handling of speaker labels.
+    Perform speaker diarization using PyAnnote with improved error handling.
+    Returns a list of speaker segments (start time, end time, speaker label).
     """
     try:
         diarization_result = diarization_pipeline(audio_file)
         speaker_segments = []
-        speaker_mapping = {}  # Dictionary to store unique speaker labels
-        speaker_index = 0  # Start indexing speakers
+        speaker_count = 0
         
+        # Collect all speaker segments
         for segment, _, speaker in diarization_result.itertracks(yield_label=True):
-            if speaker not in speaker_mapping:
-                speaker_mapping[speaker] = f"SPEAKER_{speaker_index}"
-                speaker_index += 1  # Increment speaker count only for new speakers
-            
             speaker_segments.append({
                 "start": round(segment.start, 2),
                 "end": round(segment.end, 2),
-                "speaker": speaker_mapping[speaker]
+                "speaker": speaker
             })
-        
+            speaker_count = max(speaker_count, int(speaker.split("_")[1]) if "_" in speaker else 0)
+            
+        # If no speakers found, provide detailed information for debugging
         if not speaker_segments:
-            st.warning("No speakers detected. Check if the audio contains clear speech.")
-        
-        # After diarization, give option to rename speakers
-        if speaker_segments:
-            st.subheader("Speaker Identification")
-            st.write("The following speakers were detected. You can rename them if needed:")
+            st.warning("No speakers detected in the audio. Check if the audio contains clear speech.")
+            # Still return empty list to avoid errors in downstream processing
+        else:
+            st.info(f"Successfully identified {speaker_count + 1} speakers.")
             
-            new_mapping = {}
-            for original_label in set(segment["speaker"] for segment in speaker_segments):
-                default_name = original_label
-                new_name = st.text_input(f"Rename {original_label}", value=default_name)
-                new_mapping[original_label] = new_name
-            
-            # Update speaker names if the user modified them
-            for segment in speaker_segments:
-                segment["speaker"] = new_mapping.get(segment["speaker"], segment["speaker"])
-        
         return speaker_segments
-
+        
     except Exception as e:
         st.error(f"Speaker diarization failed: {str(e)}")
+        # Return a default single speaker for all content to prevent downstream errors
         return [{"start": 0.0, "end": 1000.0, "speaker": "SPEAKER_0"}]
-
 
 def handle_multilanguage_audio(audio_file_path, target_language="english"):
     """
