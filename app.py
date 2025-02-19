@@ -33,18 +33,6 @@ def batch_analyze_sentiments(messages):
     ]
     return sentiments
 
-def get_segments_from_whisper(response):
-    """Extract segments directly from Whisper output"""
-    segments = []
-    if hasattr(response, 'segments'):
-        for segment in response.segments:
-            segments.append({
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text
-            })
-    return segments
-    
 def diarize_audio(diarization_pipeline, audio_file):
     """
     Perform speaker diarization using PyAnnote with improved handling of speaker labels.
@@ -173,35 +161,6 @@ def split_into_sentences(transcription):
     sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
     return [sentence.strip() for sentence in sentences if sentence.strip()]
 
-
-def split_into_segments_by_silence(text, min_segment_length=5):
-    """
-    Fallback function that tries to split text into segments
-    based on repeated spaces which might indicate pauses
-    """
-    # Simple heuristic - split on multiple spaces or newlines
-    rough_segments = re.split(r'\s{3,}|\n+', text)
-    segments = []
-    
-    current_segment = ""
-    for part in rough_segments:
-        if not part.strip():
-            continue
-            
-        if len(current_segment.split()) >= min_segment_length:
-            segments.append(current_segment.strip())
-            current_segment = part
-        else:
-            if current_segment:
-                current_segment += " " + part
-            else:
-                current_segment = part
-    
-    if current_segment:
-        segments.append(current_segment.strip())
-        
-    return segments if segments else [text]
-    
 def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
     """
     Align Whisper sentences with PyAnnote speaker diarization results.
@@ -253,40 +212,6 @@ def align_sentences_with_diarization(sentences, word_timestamps, speaker_segment
 
     return aligned_sentences
 
-def align_segments_with_speakers(whisper_segments, speaker_segments):
-    """Align Whisper segments with speaker diarization results based on time overlap"""
-    aligned_segments = []
-    
-    for segment in whisper_segments:
-        segment_start = segment['start']
-        segment_end = segment['end']
-        segment_duration = segment_end - segment_start
-        
-        # Find which speaker has maximum overlap with this segment
-        max_overlap = 0
-        assigned_speaker = "Unknown"
-        
-        for speaker_segment in speaker_segments:
-            overlap_start = max(segment_start, speaker_segment['start'])
-            overlap_end = min(segment_end, speaker_segment['end'])
-            
-            if overlap_end > overlap_start:
-                overlap_duration = overlap_end - overlap_start
-                overlap_ratio = overlap_duration / segment_duration
-                
-                if overlap_ratio > max_overlap:
-                    max_overlap = overlap_ratio
-                    assigned_speaker = speaker_segment['speaker']
-        
-        aligned_segments.append({
-            "start": segment_start,
-            "end": segment_end,
-            "text": segment.get('text', ''),
-            "speaker": assigned_speaker
-        })
-    
-    return aligned_segments
-    
 # Highlight positive and negative sentiments
 def style_table(row):
     if row["Sentiment"] == "POSITIVE":
@@ -395,44 +320,37 @@ if st.button('Run Sentiment Analysis'):
         if audio_results['translation']:
             st.write("### English Translation:")
             st.text_area("Translation", audio_results['translation'], height=200)
-            # Choose which text to analyze
-            text_for_analysis = audio_results['translation'] if audio_results['primary_language'] != "en" else audio_results['transcription']
+            # If the translation exists, use it if it's in English
+            if audio_results['primary_language'] == "en":
+                text_for_analysis = audio_results['translation']
+            else:
+                text_for_analysis = audio_results['transcription']
         else:
             text_for_analysis = audio_results['transcription']
         
-        # Speaker Diarization with improved alignment
+        # Speaker Diarization with improved function
         st.write("Performing Speaker Diarization...")
         try:
-            # Extract segments directly from Whisper response
-            whisper_segments = get_segments_from_whisper(audio_results['original_response'])
-            
-            # Load and run diarization pipeline
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
             
-            # Align Whisper segments with speaker information
+            # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            segments_with_speakers = align_segments_with_speakers(whisper_segments, speaker_segments)
-            
-            # Display segmented transcript with speakers
-            st.write("### Transcript with Speaker Labels:")
-            for segment in segments_with_speakers:
-                st.markdown(f"**{segment['speaker']}** ({segment['start']:.2f}s - {segment['end']:.2f}s): {segment['text']}")
+            sentences = split_into_sentences(text_for_analysis)
+            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
             
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
-            messages = [s["text"] for s in segments_with_speakers]
+            messages = [s["text"] for s in sentences_with_speakers]
             sentiments = batch_analyze_sentiments(messages)
             
             # Create results DataFrame
             results = []
             for i, sentiment in enumerate(sentiments):
-                segment = segments_with_speakers[i]
+                speaker = sentences_with_speakers[i]["speaker"]
                 results.append({
-                    "Start": f"{segment['start']:.2f}s",
-                    "End": f"{segment['end']:.2f}s",
-                    "Speaker": segment["speaker"],
-                    "Text": segment["text"],
+                    "Speaker": speaker,
+                    "Text": messages[i],
                     "Sentiment": sentiment["label"],
                     "Score": round(sentiment["score"], 2)
                 })
@@ -450,14 +368,14 @@ if st.button('Run Sentiment Analysis'):
             st.write("Attempting sentiment analysis on whole transcript without speaker diarization...")
             
             # Fallback: analyze whole transcript
-            segments = split_into_segments_by_silence(text_for_analysis)
-            sentiments = batch_analyze_sentiments(segments)
+            sentences = split_into_sentences(text_for_analysis)
+            sentiments = batch_analyze_sentiments(sentences)
             
             results = []
-            for i, segment in enumerate(segments):
+            for i, sentence in enumerate(sentences):
                 sentiment = sentiments[i]
                 results.append({
-                    "Text": segment,
+                    "Text": sentence,
                     "Sentiment": sentiment["label"],
                     "Score": round(sentiment["score"], 2)
                 })
