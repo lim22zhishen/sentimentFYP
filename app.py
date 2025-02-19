@@ -102,7 +102,7 @@ def style_table(row):
 # Load Whisper model
 @st.cache_resource
 def load_whisper_model():
-    return whisper.load_model("large")
+    return whisper.load_model("base")
 
 # Load PyAnnote diarization pipeline
 @st.cache_resource
