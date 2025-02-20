@@ -34,70 +34,64 @@ def batch_analyze_sentiments(messages):
     return sentiments
 
 def diarize_audio(diarization_pipeline, audio_file):
+    """
+    Perform speaker diarization with improved speaker label handling.
+    """
     try:
-        # Enhanced debugging
         st.write("Starting diarization...")
+        diarization_result = diarization_pipeline(audio_file)
         
-        # Check audio file validity
-        import soundfile as sf
-        try:
-            data, samplerate = sf.read(audio_file)
-            audio_duration = len(data) / samplerate
-            st.write(f"Audio file loaded successfully. Duration: {audio_duration:.2f} seconds")
-            if audio_duration < 1.0:
-                st.warning("Audio file is very short, which may affect diarization quality")
-        except Exception as audio_error:
-            st.warning(f"Audio file check warning: {str(audio_error)}")
-        
-        # Run diarization with progress indicator
-        with st.spinner("Running speaker diarization..."):
-            diarization_result = diarization_pipeline(audio_file)
-        
-        # Extract and validate segments
         speaker_segments = []
-        speakers = set()
+        unique_speakers = set()
+        
+        # Debug: Print raw diarization results
+        st.write("Raw diarization segments:")
+        debug_segments = []
         
         for segment, _, speaker in diarization_result.itertracks(yield_label=True):
-            speaker_segments.append({
+            # Store the exact speaker label from PyAnnote
+            speaker_id = speaker  # Keep original ID (like "SPEAKER_00", "SPEAKER_01")
+            unique_speakers.add(speaker_id)
+            
+            segment_info = {
                 "start": round(segment.start, 2),
                 "end": round(segment.end, 2),
-                "speaker": speaker
-            })
-            speakers.add(speaker)
+                "speaker": speaker_id
+            }
+            speaker_segments.append(segment_info)
+            debug_segments.append(f"{segment.start:.2f}-{segment.end:.2f}: {speaker_id}")
         
-        # Validation
-        if not speaker_segments:
-            st.warning("No speaker segments detected. This might indicate an issue with the audio.")
-            # Create a default segment covering the entire audio
-            speaker_segments = [{"start": 0.0, "end": audio_duration, "speaker": "SPEAKER_0"}]
+        # Display debug info
+        st.code("\n".join(debug_segments[:10]) + 
+                (f"\n... plus {len(debug_segments)-10} more segments" if len(debug_segments) > 10 else ""))
         
-        # Merge very short segments (less than 0.5s) with adjacent segments from the same speaker
-        if len(speaker_segments) > 1:
-            merged_segments = [speaker_segments[0]]
-            for segment in speaker_segments[1:]:
-                prev = merged_segments[-1]
-                # If same speaker and close together, merge
-                if (segment['speaker'] == prev['speaker'] and 
-                    segment['start'] - prev['end'] < 0.3):
-                    prev['end'] = segment['end']
-                # If very short segment, try to merge with prev
-                elif segment['end'] - segment['start'] < 0.5:
-                    # Keep the previous segment as is
-                    pass
-                else:
-                    merged_segments.append(segment)
-            
-            speaker_segments = merged_segments
-            
-        st.success(f"Diarization complete. Found {len(speakers)} unique speakers and {len(speaker_segments)} speech segments.")
-        return speaker_segments
+        st.success(f"Diarization complete. Found {len(unique_speakers)} unique speakers and {len(speaker_segments)} speech segments.")
+        
+        # Map speaker IDs to more user-friendly names (optional)
+        speaker_map = {}
+        for i, speaker in enumerate(sorted(unique_speakers)):
+            speaker_map[speaker] = f"Speaker {i+1}"
+        
+        # Show speaker mapping
+        st.write("Speaker mapping:")
+        for original, mapped in speaker_map.items():
+            st.write(f"{original} → {mapped}")
+        
+        # Map the speaker IDs in the segments (optional)
+        mapped_segments = []
+        for segment in speaker_segments:
+            mapped_segment = segment.copy()
+            mapped_segment["original_speaker"] = segment["speaker"]
+            mapped_segment["speaker"] = speaker_map.get(segment["speaker"], segment["speaker"])
+            mapped_segments.append(mapped_segment)
+        
+        return mapped_segments
         
     except Exception as e:
         st.error(f"Speaker diarization failed: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
-        # Return a default single speaker
-        return [{"start": 0.0, "end": 1000.0, "speaker": "SPEAKER_0"}]
+        return [{"start": 0.0, "end": 1000.0, "speaker": "Speaker 1"}]
 
 def handle_multilanguage_audio(audio_file_path, target_language="english"):
     """
@@ -234,47 +228,45 @@ def split_into_sentences(transcription, word_timestamps=None):
             return [" ".join(chunk) for chunk in word_chunks]
             
 def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
+    """
+    Align sentences with speaker segments, preserving speaker labels.
+    """
     aligned_sentences = []
     
-    # Sort speaker segments by start time for efficient searching
-    speaker_segments = sorted(speaker_segments, key=lambda x: x['start'])
-    
     for sentence in sentences:
-        # Find more reliable timestamp matches
-        words = sentence.split()
-        first_word_matches = [w for w in word_timestamps if w['word'].strip().lower() in words[0].lower()]
-        last_word_matches = [w for w in word_timestamps if w['word'].strip().lower() in words[-1].lower()]
+        # Find sentence timing
+        sentence_words = sentence.split()
+        sentence_start = None
+        sentence_end = None
         
-        if first_word_matches and last_word_matches:
-            sentence_start = first_word_matches[0]['start']
-            sentence_end = last_word_matches[-1]['end']
-        else:
-            # Improved fallback - look for any words in the sentence
-            matching_words = [w for w in word_timestamps if any(w['word'].strip().lower() in word.lower() for word in words)]
-            if matching_words:
-                sentence_start = matching_words[0]['start']
-                sentence_end = matching_words[-1]['end']
-            else:
-                # Last resort fallback
-                sentence_start, sentence_end = 0.0, 5.0
+        # Get timing from word timestamps when available
+        if word_timestamps:
+            # Try to find first and last words
+            for word_data in word_timestamps:
+                word = word_data['word'].strip().lower()
+                if any(w.lower().startswith(word) for w in sentence_words[:3]) and sentence_start is None:
+                    sentence_start = word_data['start']
+                if any(w.lower().endswith(word) for w in sentence_words[-3:]):
+                    sentence_end = word_data['end']
+                    
+        # Default fallback timing
+        sentence_start = sentence_start if sentence_start is not None else 0.0
+        sentence_end = sentence_end if sentence_end is not None else (sentence_start + 5.0)
         
-        # Use weighted voting to determine the speaker (based on overlap duration)
-        speaker_votes = {}
+        # Find the most likely speaker based on overlap
+        speaker = "Unknown"
+        max_overlap = 0
+        
         for segment in speaker_segments:
-            # Calculate overlap
-            overlap_start = max(sentence_start, segment['start'])
-            overlap_end = min(sentence_end, segment['end'])
+            segment_start, segment_end = segment['start'], segment['end']
+            overlap_start = max(sentence_start, segment_start)
+            overlap_end = min(sentence_end, segment_end)
             
             if overlap_end > overlap_start:
                 overlap_duration = overlap_end - overlap_start
-                speaker_votes[segment['speaker']] = speaker_votes.get(segment['speaker'], 0) + overlap_duration
-        
-        if speaker_votes:
-            speaker = max(speaker_votes.items(), key=lambda x: x[1])[0]
-        else:
-            # Find the closest speaker segment if no overlap
-            distances = [(abs(segment['start'] - sentence_start), segment['speaker']) for segment in speaker_segments]
-            speaker = min(distances, key=lambda x: x[0])[1] if distances else "Unknown"
+                if overlap_duration > max_overlap:
+                    max_overlap = overlap_duration
+                    speaker = segment['speaker']  # This should now have the proper label
         
         aligned_sentences.append({
             "start": round(sentence_start, 2),
@@ -422,8 +414,9 @@ if st.button('Run Sentiment Analysis'):
             results = []
             for i, sentiment in enumerate(sentiments):
                 speaker = sentences_with_speakers[i]["speaker"]
+                # Make sure we're using the mapped/friendly speaker name
                 results.append({
-                    "Speaker": speaker,
+                    "Speaker": speaker,  # This should now show the proper speaker ID
                     "Text": messages[i],
                     "Sentiment": sentiment["label"],
                     "Score": round(sentiment["score"], 2)
@@ -433,7 +426,7 @@ if st.button('Run Sentiment Analysis'):
             st.write("Final Analysis:")
             st.dataframe(df)
             
-            # Sentiment visualization
+            # For your visualization:
             fig = px.line(df, x=df.index, y="Score", color="Speaker", title="Sentiment Score Over Time")
             st.plotly_chart(fig)
             
