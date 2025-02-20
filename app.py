@@ -305,14 +305,12 @@ def align_sentences_with_diarization(sentences, word_timestamps, speaker_segment
         if overlapping_segments:
             best_match = max(overlapping_segments, key=lambda x: x['duration'])
             speaker = best_match['speaker']
-            st.write(f"✓ Found overlapping speaker: {speaker} (overlap: {best_match['duration']:.2f}s)")
         else:
             # Find nearest segment if no overlap
             mid_sentence = (sentence_timing['start'] + sentence_timing['end']) / 2
             nearest_segment = min(speaker_segments, key=lambda x: 
                                  min(abs(x['start'] - mid_sentence), abs(x['end'] - mid_sentence)))
             speaker = nearest_segment['speaker']
-            st.write(f"⚠️ No overlap - using nearest speaker: {speaker}")
         
         # Add to results
         aligned_sentences.append({
@@ -321,10 +319,6 @@ def align_sentences_with_diarization(sentences, word_timestamps, speaker_segment
             'text': sentence,
             'speaker': speaker
         })
-        
-        # Only show detailed debug for first few sentences
-        if i >= 3:
-            break
     
     st.write(f"... aligned {len(sentences)} sentences")
     
