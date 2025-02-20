@@ -44,27 +44,6 @@ def diarize_audio(diarization_pipeline, audio_file):
         speaker_segments = []
         unique_speakers = set()
         
-        # Debug: Print raw diarization results
-        st.write("Raw diarization segments:")
-        debug_segments = []
-        
-        for segment, _, speaker in diarization_result.itertracks(yield_label=True):
-            # Store the exact speaker label from PyAnnote
-            speaker_id = speaker  # Keep original ID (like "SPEAKER_00", "SPEAKER_01")
-            unique_speakers.add(speaker_id)
-            
-            segment_info = {
-                "start": round(segment.start, 2),
-                "end": round(segment.end, 2),
-                "speaker": speaker_id
-            }
-            speaker_segments.append(segment_info)
-            debug_segments.append(f"{segment.start:.2f}-{segment.end:.2f}: {speaker_id}")
-        
-        # Display debug info
-        st.code("\n".join(debug_segments[:10]) + 
-                (f"\n... plus {len(debug_segments)-10} more segments" if len(debug_segments) > 10 else ""))
-        
         st.success(f"Diarization complete. Found {len(unique_speakers)} unique speakers and {len(speaker_segments)} speech segments.")
         
         # Map speaker IDs to more user-friendly names (optional)
@@ -320,20 +299,6 @@ def align_sentences_with_diarization(sentences, word_timestamps, speaker_segment
             "speaker": primary_speaker,
             "confidence": "high" if overlapping_segments else "low"
         })
-    
-    # Display debug information
-    st.write("### Sentence-Speaker Alignment Debug")
-    st.write(f"Found timing for {sum(1 for s in aligned_sentences if s['confidence'] == 'high')} out of {len(aligned_sentences)} sentences")
-    
-    # Show a sample of the debug info
-    debug_sample = debug_info[:min(5, len(debug_info))]
-    for item in debug_sample:
-        st.write(f"**Sentence {item['sentence_idx']}**: {item['sentence_text']}")
-        st.write(f"Timing: {item['estimated_timing']}")
-        st.write(f"Overlapping speakers: {', '.join(item['overlapping_speakers']) if item['overlapping_speakers'] else 'None'}")
-        if 'speaker_method' in item:
-            st.write(f"Assignment method: {item['speaker_method']}")
-        st.write("---")
     
     return aligned_sentences
 
