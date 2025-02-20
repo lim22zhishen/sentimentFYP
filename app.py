@@ -34,40 +34,69 @@ def batch_analyze_sentiments(messages):
     return sentiments
 
 def diarize_audio(diarization_pipeline, audio_file):
-    """
-    Perform speaker diarization using PyAnnote with improved error handling.
-    Returns a list of speaker segments (start time, end time, speaker label).
-    """
     try:
-        diarization_result = diarization_pipeline(audio_file)
+        # Enhanced debugging
+        st.write("Starting diarization...")
+        
+        # Check audio file validity
+        import soundfile as sf
+        try:
+            data, samplerate = sf.read(audio_file)
+            audio_duration = len(data) / samplerate
+            st.write(f"Audio file loaded successfully. Duration: {audio_duration:.2f} seconds")
+            if audio_duration < 1.0:
+                st.warning("Audio file is very short, which may affect diarization quality")
+        except Exception as audio_error:
+            st.warning(f"Audio file check warning: {str(audio_error)}")
+        
+        # Run diarization with progress indicator
+        with st.spinner("Running speaker diarization..."):
+            diarization_result = diarization_pipeline(audio_file)
+        
+        # Extract and validate segments
         speaker_segments = []
-        speaker_count = 0
-
-        print("\n🔍 RAW DIARIZATION OUTPUT:\n")
-        for segment, _, speaker in diarization_result.itertracks(yield_label=True):
-            print(f"⏱ {segment.start:.2f}s - {segment.end:.2f}s: {speaker}")
-            
-        # Collect all speaker segments
+        speakers = set()
+        
         for segment, _, speaker in diarization_result.itertracks(yield_label=True):
             speaker_segments.append({
                 "start": round(segment.start, 2),
                 "end": round(segment.end, 2),
                 "speaker": speaker
             })
-            speaker_count = max(speaker_count, int(speaker.split("_")[1]) if "_" in speaker else 0)
-            
-        # If no speakers found, provide detailed information for debugging
+            speakers.add(speaker)
+        
+        # Validation
         if not speaker_segments:
-            st.warning("No speakers detected in the audio. Check if the audio contains clear speech.")
-            # Still return empty list to avoid errors in downstream processing
-        else:
-            st.info(f"Successfully identified {speaker_count + 1} speakers.")
+            st.warning("No speaker segments detected. This might indicate an issue with the audio.")
+            # Create a default segment covering the entire audio
+            speaker_segments = [{"start": 0.0, "end": audio_duration, "speaker": "SPEAKER_0"}]
+        
+        # Merge very short segments (less than 0.5s) with adjacent segments from the same speaker
+        if len(speaker_segments) > 1:
+            merged_segments = [speaker_segments[0]]
+            for segment in speaker_segments[1:]:
+                prev = merged_segments[-1]
+                # If same speaker and close together, merge
+                if (segment['speaker'] == prev['speaker'] and 
+                    segment['start'] - prev['end'] < 0.3):
+                    prev['end'] = segment['end']
+                # If very short segment, try to merge with prev
+                elif segment['end'] - segment['start'] < 0.5:
+                    # Keep the previous segment as is
+                    pass
+                else:
+                    merged_segments.append(segment)
             
+            speaker_segments = merged_segments
+            
+        st.success(f"Diarization complete. Found {len(speakers)} unique speakers and {len(speaker_segments)} speech segments.")
         return speaker_segments
         
     except Exception as e:
         st.error(f"Speaker diarization failed: {str(e)}")
-        # Return a default single speaker for all content to prevent downstream errors
+        import traceback
+        st.code(traceback.format_exc())
+        # Return a default single speaker
         return [{"start": 0.0, "end": 1000.0, "speaker": "SPEAKER_0"}]
 
 def handle_multilanguage_audio(audio_file_path, target_language="english"):
@@ -153,55 +182,57 @@ def split_into_sentences(transcription):
     return [sentence.strip() for sentence in sentences if sentence.strip()]
 
 def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
-    """
-    Align Whisper sentences with PyAnnote speaker diarization results.
-    """
     aligned_sentences = []
-
-    # Loop through sentences and estimate speaker
+    
+    # Sort speaker segments by start time for efficient searching
+    speaker_segments = sorted(speaker_segments, key=lambda x: x['start'])
+    
     for sentence in sentences:
+        # Find more reliable timestamp matches
         words = sentence.split()
-        sentence_start = None
-        sentence_end = None
-
-        # Find the start and end timestamps for the current sentence
-        # This is a simplification - in practice you might need more sophisticated alignment
-        if word_timestamps:
-            for word_data in word_timestamps:
-                if word_data['word'].strip() in words[0].lower() and sentence_start is None:
-                    sentence_start = word_data['start']
-                if word_data['word'].strip() in words[-1].lower():
-                    sentence_end = word_data['end']
-                    break
-
-        # Fallback in case timestamps are missing
-        sentence_start = round(sentence_start or 0.0, 2)
-        sentence_end = round(sentence_end or sentence_start + 5, 2)
-
-        # Assign speaker based on diarization timestamps
-        speaker = "Unknown"
-        max_overlap = 0
+        first_word_matches = [w for w in word_timestamps if w['word'].strip().lower() in words[0].lower()]
+        last_word_matches = [w for w in word_timestamps if w['word'].strip().lower() in words[-1].lower()]
         
+        if first_word_matches and last_word_matches:
+            sentence_start = first_word_matches[0]['start']
+            sentence_end = last_word_matches[-1]['end']
+        else:
+            # Improved fallback - look for any words in the sentence
+            matching_words = [w for w in word_timestamps if any(w['word'].strip().lower() in word.lower() for word in words)]
+            if matching_words:
+                sentence_start = matching_words[0]['start']
+                sentence_end = matching_words[-1]['end']
+            else:
+                # Last resort fallback
+                sentence_start, sentence_end = 0.0, 5.0
+        
+        # Use weighted voting to determine the speaker (based on overlap duration)
+        speaker_votes = {}
         for segment in speaker_segments:
-            # Find the segment with maximum overlap with the sentence
-            segment_start, segment_end = segment['start'], segment['end']
-            overlap_start = max(sentence_start, segment_start)
-            overlap_end = min(sentence_end, segment_end)
+            # Calculate overlap
+            overlap_start = max(sentence_start, segment['start'])
+            overlap_end = min(sentence_end, segment['end'])
             
-            if overlap_end > overlap_start:  # If there's an overlap
+            if overlap_end > overlap_start:
                 overlap_duration = overlap_end - overlap_start
-                if overlap_duration > max_overlap:
-                    max_overlap = overlap_duration
-                    speaker = segment['speaker']
-
+                speaker_votes[segment['speaker']] = speaker_votes.get(segment['speaker'], 0) + overlap_duration
+        
+        if speaker_votes:
+            speaker = max(speaker_votes.items(), key=lambda x: x[1])[0]
+        else:
+            # Find the closest speaker segment if no overlap
+            distances = [(abs(segment['start'] - sentence_start), segment['speaker']) for segment in speaker_segments]
+            speaker = min(distances, key=lambda x: x[0])[1] if distances else "Unknown"
+        
         aligned_sentences.append({
-            "start": sentence_start,
-            "end": sentence_end,
+            "start": round(sentence_start, 2),
+            "end": round(sentence_end, 2),
             "text": sentence,
             "speaker": speaker
         })
-
+    
     return aligned_sentences
+
 
 # Highlight positive and negative sentiments
 def style_table(row):
