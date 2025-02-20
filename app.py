@@ -229,111 +229,104 @@ def split_into_sentences(transcription, word_timestamps=None):
             
 def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
     """
-    Improved alignment between sentences and speaker segments with better debug info.
+    Improved alignment that focuses on precise time matching between diarization and transcription.
     """
     aligned_sentences = []
-    debug_info = []
     
-    # First, ensure speaker_segments are sorted by start time
+    # Ensure speaker segments are sorted by start time
     speaker_segments = sorted(speaker_segments, key=lambda x: x['start'])
     
+    # For debugging - show segment boundaries
+    segment_ranges = [f"{seg['start']:.2f}-{seg['end']:.2f}: {seg['speaker']}" for seg in speaker_segments[:10]]
+    st.write("Speaker segment timeline (first 10):")
+    st.code("\n".join(segment_ranges))
+    
+    # For each sentence, try to find its timing and corresponding speaker
     for i, sentence in enumerate(sentences):
-        sentence_words = sentence.split()
-        sentence_start = None
-        sentence_end = None
+        # STEP 1: Get reliable timing for this sentence
+        sentence_timing = None
         
-        # Get better timing information from word timestamps
+        # Method 1: Use word timestamps if available
         if word_timestamps:
-            # Find words that appear in the sentence
-            matching_words = []
-            for word_data in word_timestamps:
-                word = word_data['word'].strip().lower()
-                if any(word in w.lower() for w in sentence_words):
-                    matching_words.append(word_data)
+            sentence_words = sentence.split()
+            matching_timestamps = []
             
-            if matching_words:
-                # Sort by start time
-                matching_words.sort(key=lambda x: x['start'])
-                sentence_start = matching_words[0]['start']
-                sentence_end = matching_words[-1]['end']
-                
-        # If word matching failed, estimate based on sentence position
-        if sentence_start is None:
-            # Estimate timing based on position in the transcript
+            # Find ANY words that match between this sentence and timestamps
+            for word_info in word_timestamps:
+                word = word_info['word'].strip().lower()
+                if any(w.lower() in word or word in w.lower() for w in sentence_words):
+                    matching_timestamps.append(word_info)
+            
+            if matching_timestamps:
+                # Sort by time and take first/last
+                matching_timestamps.sort(key=lambda x: x['start'])
+                sentence_timing = {
+                    'start': matching_timestamps[0]['start'],
+                    'end': matching_timestamps[-1]['end']
+                }
+        
+        # Method 2: Estimate based on sentence position
+        if not sentence_timing:
+            # If this is the first sentence, start at beginning
             if i == 0:
-                sentence_start = 0.0
+                start_time = 0.0
+            # Otherwise use the end of previous sentence
             else:
-                prev_end = aligned_sentences[-1]['end'] if aligned_sentences else 0.0
-                sentence_start = prev_end
+                start_time = aligned_sentences[-1]['end'] if aligned_sentences else 0.0
+                
+            # Estimate duration based on word count (avg 0.3 sec per word)
+            word_count = len(sentence.split())
+            duration = max(1.0, word_count * 0.3)
             
-            # Estimate ~2 seconds per 5 words as a fallback
-            words_duration = len(sentence_words) * 0.4  # 0.4 sec per word estimate
-            sentence_end = sentence_start + max(words_duration, 1.0)
+            sentence_timing = {
+                'start': start_time,
+                'end': start_time + duration
+            }
         
-        # Add small buffers to increase chance of overlap
-        search_start = max(0, sentence_start - 0.5)
-        search_end = sentence_end + 0.5
+        # STEP 2: Find which speaker segment contains this sentence
+        # Display timing for debugging
+        st.write(f"Sentence {i}: '{sentence[:40]}...' estimated time: {sentence_timing['start']:.2f}-{sentence_timing['end']:.2f}")
         
-        # Find the speaker(s) active during this sentence
+        # Find ALL overlapping segments
         overlapping_segments = []
         for segment in speaker_segments:
-            # Check for any overlap
-            if segment['end'] > search_start and segment['start'] < search_end:
-                overlap_start = max(search_start, segment['start'])
-                overlap_end = min(search_end, segment['end'])
+            # Check for overlap
+            overlap_start = max(sentence_timing['start'], segment['start'])
+            overlap_end = min(sentence_timing['end'], segment['end'])
+            
+            if overlap_end > overlap_start:
                 overlap_duration = overlap_end - overlap_start
-                
                 overlapping_segments.append({
                     'speaker': segment['speaker'],
-                    'overlap': overlap_duration
+                    'duration': overlap_duration
                 })
         
-        # Debug info
-        segment_debug = {
-            'sentence_idx': i,
-            'sentence_text': sentence[:30] + ('...' if len(sentence) > 30 else ''),
-            'estimated_timing': f"{sentence_start:.2f} - {sentence_end:.2f}",
-            'overlapping_speakers': [f"{s['speaker']} ({s['overlap']:.2f}s)" for s in overlapping_segments]
-        }
-        debug_info.append(segment_debug)
-        
-        # Determine the primary speaker (with most overlap)
+        # Choose speaker with most overlap
         if overlapping_segments:
-            primary_speaker = max(overlapping_segments, key=lambda x: x['overlap'])['speaker']
+            best_match = max(overlapping_segments, key=lambda x: x['duration'])
+            speaker = best_match['speaker']
+            st.write(f"✓ Found overlapping speaker: {speaker} (overlap: {best_match['duration']:.2f}s)")
         else:
-            # No overlap found - find closest segment
-            distances = []
-            for segment in speaker_segments:
-                # Calculate distance to the middle of the sentence
-                sentence_mid = (sentence_start + sentence_end) / 2
-                segment_mid = (segment['start'] + segment['end']) / 2
-                distance = abs(sentence_mid - segment_mid)
-                distances.append((distance, segment['speaker']))
-            
-            primary_speaker = min(distances, key=lambda x: x[0])[1] if distances else "Unknown"
-            segment_debug['speaker_method'] = "nearest (no overlap)"
+            # Find nearest segment if no overlap
+            mid_sentence = (sentence_timing['start'] + sentence_timing['end']) / 2
+            nearest_segment = min(speaker_segments, key=lambda x: 
+                                 min(abs(x['start'] - mid_sentence), abs(x['end'] - mid_sentence)))
+            speaker = nearest_segment['speaker']
+            st.write(f"⚠️ No overlap - using nearest speaker: {speaker}")
         
+        # Add to results
         aligned_sentences.append({
-            "start": round(sentence_start, 2),
-            "end": round(sentence_end, 2),
-            "text": sentence,
-            "speaker": primary_speaker,
-            "confidence": "high" if overlapping_segments else "low"
+            'start': round(sentence_timing['start'], 2),
+            'end': round(sentence_timing['end'], 2),
+            'text': sentence,
+            'speaker': speaker
         })
+        
+        # Only show detailed debug for first few sentences
+        if i >= 3:
+            break
     
-    # Display debug information
-    st.write("### Sentence-Speaker Alignment Debug")
-    st.write(f"Found timing for {sum(1 for s in aligned_sentences if s['confidence'] == 'high')} out of {len(aligned_sentences)} sentences")
-    
-    # Show a sample of the debug info
-    debug_sample = debug_info[:min(5, len(debug_info))]
-    for item in debug_sample:
-        st.write(f"**Sentence {item['sentence_idx']}**: {item['sentence_text']}")
-        st.write(f"Timing: {item['estimated_timing']}")
-        st.write(f"Overlapping speakers: {', '.join(item['overlapping_speakers']) if item['overlapping_speakers'] else 'None'}")
-        if 'speaker_method' in item:
-            st.write(f"Assignment method: {item['speaker_method']}")
-        st.write("---")
+    st.write(f"... aligned {len(sentences)} sentences")
     
     return aligned_sentences
 
@@ -464,7 +457,55 @@ if st.button('Run Sentiment Analysis'):
             st.write("Aligning transcription with speaker labels...")
             sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
             sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
+
+            # After processing diarization and alignment, but before sentiment analysis:
+            st.write("### Speaker Diarization Timeline")
             
+            # Create a direct visualization of the diarization results
+            timeline_data = []
+            for segment in speaker_segments:
+                timeline_data.append({
+                    "Speaker": segment["speaker"],
+                    "Start": segment["start"],
+                    "End": segment["end"],
+                    "Duration": segment["end"] - segment["start"]
+                })
+            
+            timeline_df = pd.DataFrame(timeline_data)
+            st.dataframe(timeline_df)
+            
+            # Visualize the timeline
+            fig = px.timeline(
+                timeline_df, 
+                x_start="Start", 
+                x_end="End", 
+                y="Speaker",
+                color="Speaker",
+                title="Speaker Timeline"
+            )
+            fig.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig)
+            
+            # Now, when you create the final results table, include the timing:
+            results = []
+            for i, sentiment in enumerate(sentiments):
+                if i < len(sentences_with_speakers):
+                    speaker = sentences_with_speakers[i]["speaker"]
+                    start_time = sentences_with_speakers[i]["start"]
+                    end_time = sentences_with_speakers[i]["end"]
+                    
+                    results.append({
+                        "Time": f"{start_time:.1f}-{end_time:.1f}",
+                        "Speaker": speaker,
+                        "Text": messages[i],
+                        "Sentiment": sentiment["label"],
+                        "Score": round(sentiment["score"], 2)
+                    })
+            
+            df = pd.DataFrame(results)
+            st.write("Final Analysis:")
+            st.dataframe(df)
+
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
