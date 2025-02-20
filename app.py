@@ -458,54 +458,6 @@ if st.button('Run Sentiment Analysis'):
             sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
             sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
 
-            # After processing diarization and alignment, but before sentiment analysis:
-            st.write("### Speaker Diarization Timeline")
-            
-            # Create a direct visualization of the diarization results
-            timeline_data = []
-            for segment in speaker_segments:
-                timeline_data.append({
-                    "Speaker": segment["speaker"],
-                    "Start": segment["start"],
-                    "End": segment["end"],
-                    "Duration": segment["end"] - segment["start"]
-                })
-            
-            timeline_df = pd.DataFrame(timeline_data)
-            st.dataframe(timeline_df)
-            
-            # Visualize the timeline
-            fig = px.timeline(
-                timeline_df, 
-                x_start="Start", 
-                x_end="End", 
-                y="Speaker",
-                color="Speaker",
-                title="Speaker Timeline"
-            )
-            fig.update_yaxes(autorange="reversed")
-            st.plotly_chart(fig)
-            
-            # Now, when you create the final results table, include the timing:
-            results = []
-            for i, sentiment in enumerate(sentiments):
-                if i < len(sentences_with_speakers):
-                    speaker = sentences_with_speakers[i]["speaker"]
-                    start_time = sentences_with_speakers[i]["start"]
-                    end_time = sentences_with_speakers[i]["end"]
-                    
-                    results.append({
-                        "Time": f"{start_time:.1f}-{end_time:.1f}",
-                        "Speaker": speaker,
-                        "Text": messages[i],
-                        "Sentiment": sentiment["label"],
-                        "Score": round(sentiment["score"], 2)
-                    })
-            
-            df = pd.DataFrame(results)
-            st.write("Final Analysis:")
-            st.dataframe(df)
-
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
