@@ -381,7 +381,7 @@ if st.button('Run Sentiment Analysis'):
 
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            sentences_with_speakers = assign_speakers_to_words(text_for_analysis, speaker_segments)
+            sentences_with_speakers = assign_speakers_to_words(audio_results, speaker_segments)
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
