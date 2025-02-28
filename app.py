@@ -412,8 +412,8 @@ if st.button('Run Sentiment Analysis'):
             st.write("Final Analysis:")
             st.dataframe(df)
 
-            print("DataFrame Columns:", df.columns)
-            print("Results List:", results)
+            st.write("DataFrame Columns:", df.columns)
+            st.write("Results List:", results)
             # For your visualization:
             fig = px.line(df, x=df.index, y="Score", color="Speaker", title="Sentiment Score Over Time")
             st.plotly_chart(fig)
@@ -435,8 +435,8 @@ if st.button('Run Sentiment Analysis'):
                     "Score": round(sentiment["score"], 2)
                 })
 
-            print("DataFrame Columns:", df.columns)
-            print("Results List:", results)
+            st.write("DataFrame Columns:", df.columns)
+            st.write("Results List:", results)
             df = pd.DataFrame(results)
             st.write("Basic Sentiment Analysis (without speaker identification):")
             st.dataframe(df)
