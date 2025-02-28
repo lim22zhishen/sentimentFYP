@@ -495,7 +495,7 @@ if st.button('Run Sentiment Analysis'):
             st.write("Attempting sentiment analysis on whole transcript without speaker diarization...")
             
             # Fallback: analyze whole transcript
-            sentences = split_into_sentences(text_for_analysis)
+            sentences = split_into_sentences(text_for_analysis,word_timestamps=None)
             sentiments = batch_analyze_sentiments(sentences)
             
             results = []
