@@ -169,6 +169,65 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         "word_timestamps": word_timestamps
     }
 
+def split_into_sentences(transcription, word_timestamps=None):
+    """
+    Split transcription into sentences without relying on punctuation.
+    Uses pauses in speech and natural language boundaries.
+    
+    Args:
+        transcription: The text transcription
+        word_timestamps: Optional list of word timing data from Whisper
+    
+    Returns:
+        List of sentence strings
+    """
+    # If we have word timestamps, use pauses to determine sentence boundaries
+    if word_timestamps and len(word_timestamps) > 1:
+        sentences = []
+        current_sentence = []
+        
+        # Define pause threshold (in seconds) that likely indicates sentence boundary
+        PAUSE_THRESHOLD = 0.5
+        
+        for i in range(len(word_timestamps) - 1):
+            current_word = word_timestamps[i]
+            next_word = word_timestamps[i+1]
+            
+            # Add current word to the sentence
+            current_sentence.append(current_word["word"].strip())
+            
+            # Check if there's a significant pause between this word and the next
+            pause_duration = next_word["start"] - current_word["end"]
+            
+            # If significant pause or ending punctuation, end the sentence
+            if (pause_duration > PAUSE_THRESHOLD or 
+                current_word["word"].strip().endswith((".", "!", "?", "。", "！", "？"))):
+                sentences.append(" ".join(current_sentence))
+                current_sentence = []
+        
+        # Add the last word and any remaining words to the last sentence
+        if current_sentence or word_timestamps:
+            current_sentence.append(word_timestamps[-1]["word"].strip())
+            sentences.append(" ".join(current_sentence))
+            
+        return sentences
+    
+    # Fallback method without timestamps - use a simple length-based approach
+    else:
+        # For languages without clear word boundaries (like Chinese/Japanese)
+        if any(ord(c) > 0x4e00 and ord(c) < 0x9FFF for c in transcription):
+            # Split every ~15 characters for logographic scripts
+            char_chunks = [transcription[i:i+15] for i in range(0, len(transcription), 15)]
+            return char_chunks
+        else:
+            # Split by words for languages with spaces
+            words = transcription.split()
+            # Group into chunks of approximately 10-15 words
+            WORDS_PER_SENTENCE = 10
+            word_chunks = [words[i:i+WORDS_PER_SENTENCE] for i in range(0, len(words), WORDS_PER_SENTENCE)]
+            return [" ".join(chunk) for chunk in word_chunks]
+
+
 def assign_speakers_to_words(audio_results, speaker_segments):
     """Assigns speakers to words based on timestamps."""
     word_timestamps = audio_results['word_timestamps']
