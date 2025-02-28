@@ -393,12 +393,10 @@ if st.button('Run Sentiment Analysis'):
             for i, sentiment in enumerate(sentiments):
                 if i < len(sentences_with_speakers):  # Safety check
                     speaker = sentences_with_speakers[i]["speaker"]
-                    confidence = sentences_with_speakers[i].get("confidence", "unknown")
                     
                     # Add debugging info right in the results
                     results.append({
                         "Speaker": speaker,
-                        "Confidence": confidence,
                         "Text": messages[i],
                         "Sentiment": sentiment["label"],
                         "Score": round(sentiment["score"], 2),
