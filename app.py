@@ -169,206 +169,34 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         "word_timestamps": word_timestamps
     }
 
-def split_into_sentences(transcription, word_timestamps=None):
-    """
-    Split transcription into sentences without relying on punctuation.
-    Uses pauses in speech and natural language boundaries.
-    
-    Args:
-        transcription: The text transcription
-        word_timestamps: Optional list of word timing data from Whisper
-    
-    Returns:
-        List of sentence strings
-    """
-    # If we have word timestamps, use pauses to determine sentence boundaries
-    if word_timestamps and len(word_timestamps) > 1:
-        sentences = []
-        current_sentence = []
-        
-        # Define pause threshold (in seconds) that likely indicates sentence boundary
-        PAUSE_THRESHOLD = 0.5
-        
-        for i in range(len(word_timestamps) - 1):
-            current_word = word_timestamps[i]
-            next_word = word_timestamps[i+1]
-            
-            # Add current word to the sentence
-            current_sentence.append(current_word["word"].strip())
-            
-            # Check if there's a significant pause between this word and the next
-            pause_duration = next_word["start"] - current_word["end"]
-            
-            # If significant pause or ending punctuation, end the sentence
-            if (pause_duration > PAUSE_THRESHOLD or 
-                current_word["word"].strip().endswith((".", "!", "?", "。", "！", "？"))):
-                sentences.append(" ".join(current_sentence))
-                current_sentence = []
-        
-        # Add the last word and any remaining words to the last sentence
-        if current_sentence or word_timestamps:
-            current_sentence.append(word_timestamps[-1]["word"].strip())
-            sentences.append(" ".join(current_sentence))
-            
-        return sentences
-    
-    # Fallback method without timestamps - use a simple length-based approach
-    else:
-        # For languages without clear word boundaries (like Chinese/Japanese)
-        if any(ord(c) > 0x4e00 and ord(c) < 0x9FFF for c in transcription):
-            # Split every ~15 characters for logographic scripts
-            char_chunks = [transcription[i:i+15] for i in range(0, len(transcription), 15)]
-            return char_chunks
-        else:
-            # Split by words for languages with spaces
-            words = transcription.split()
-            # Group into chunks of approximately 10-15 words
-            WORDS_PER_SENTENCE = 10
-            word_chunks = [words[i:i+WORDS_PER_SENTENCE] for i in range(0, len(words), WORDS_PER_SENTENCE)]
-            return [" ".join(chunk) for chunk in word_chunks]
-            
-def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
-    """
-    Improved alignment that focuses on precise time matching between diarization and transcription.
-    """
-    aligned_sentences = []
-    
-    # Ensure speaker segments are sorted by start time
-    speaker_segments = sorted(speaker_segments, key=lambda x: x['start'])
-    
-    # For debugging - show segment boundaries
-    segment_ranges = [f"{seg['start']:.2f}-{seg['end']:.2f}: {seg['speaker']}" for seg in speaker_segments[:10]]
-    st.write("Speaker segment timeline (first 10):")
-    st.code("\n".join(segment_ranges))
-    
-    # For each sentence, try to find its timing and corresponding speaker
-    for i, sentence in enumerate(sentences):
-        # STEP 1: Get reliable timing for this sentence
-        sentence_timing = None
-        
-        # Method 1: Use word timestamps if available
-        if word_timestamps:
-            sentence_words = sentence.split()
-            matching_timestamps = []
-            
-            # Find ANY words that match between this sentence and timestamps
-            for word_info in word_timestamps:
-                word = word_info['word'].strip().lower()
-                if any(w.lower() in word or word in w.lower() for w in sentence_words):
-                    matching_timestamps.append(word_info)
-            
-            if matching_timestamps:
-                # Sort by time and take first/last
-                matching_timestamps.sort(key=lambda x: x['start'])
-                sentence_timing = {
-                    'start': matching_timestamps[0]['start'],
-                    'end': matching_timestamps[-1]['end']
-                }
-        
-        # Method 2: Estimate based on sentence position
-        if not sentence_timing:
-            # If this is the first sentence, start at beginning
-            if i == 0:
-                start_time = 0.0
-            # Otherwise use the end of previous sentence
-            else:
-                start_time = aligned_sentences[-1]['end'] if aligned_sentences else 0.0
-                
-            # Estimate duration based on word count (avg 0.3 sec per word)
-            word_count = len(sentence.split())
-            duration = max(1.0, word_count * 0.3)
-            
-            sentence_timing = {
-                'start': start_time,
-                'end': start_time + duration
-            }
-        
-        # STEP 2: Find which speaker segment contains this sentence
-        # Display timing for debugging
-        st.write(f"Sentence {i}: '{sentence[:40]}...' estimated time: {sentence_timing['start']:.2f}-{sentence_timing['end']:.2f}")
-        
-        # Find ALL overlapping segments
-        overlapping_segments = []
-        for segment in speaker_segments:
-            # Check for overlap
-            overlap_start = max(sentence_timing['start'], segment['start'])
-            overlap_end = min(sentence_timing['end'], segment['end'])
-            
-            if overlap_end > overlap_start:
-                overlap_duration = overlap_end - overlap_start
-                overlapping_segments.append({
-                    'speaker': segment['speaker'],
-                    'duration': overlap_duration
-                })
-        
-        # Choose speaker with most overlap
-        if overlapping_segments:
-            best_match = max(overlapping_segments, key=lambda x: x['duration'])
-            speaker = best_match['speaker']
-        else:
-            # Find nearest segment if no overlap
-            mid_sentence = (sentence_timing['start'] + sentence_timing['end']) / 2
-            nearest_segment = min(speaker_segments, key=lambda x: 
-                                 min(abs(x['start'] - mid_sentence), abs(x['end'] - mid_sentence)))
-            speaker = nearest_segment['speaker']
-        
-        # Add to results
-        aligned_sentences.append({
-            'start': round(sentence_timing['start'], 2),
-            'end': round(sentence_timing['end'], 2),
-            'text': sentence,
-            'speaker': speaker
-        })
-    
-    st.write(f"... aligned {len(sentences)} sentences")
-    
-    return aligned_sentences
+def assign_speakers_to_words(audio_results, speaker_segments):
+    """Assigns speakers to words based on timestamps."""
+    word_timestamps = audio_results['word_timestamps']
+    result = []
+    if not word_timestamps:
+        return []
 
-def assign_speakers_to_sentences(transcription_segments, speaker_segments):
-    """
-    Match transcription sentences with speaker segments based on overlapping timestamps.
+    for word_info in word_timestamps:
+        word_start = word_info["start"]
+        word_end = word_info["end"]
+        assigned_speaker = "Unknown Speaker"
 
-    Args:
-        transcription_segments (list): List of transcription sentences with start and end times.
-        speaker_segments (list): List of speaker segments with start and end times.
-
-    Returns:
-        list: List of sentences with assigned speakers.
-    """
-    results = []
-    for segment in transcription_segments:
-        sentence_start = segment["start"]
-        sentence_end = segment["end"]
-        text = segment["text"]
-
-        # Default speaker is "Unknown"
-        speaker = "Unknown"
-        max_overlap = 0  # Track the highest overlap duration
-
-        # Check for overlap with speaker segments
         for speaker_segment in speaker_segments:
-            spk_start = speaker_segment["start"]  # Use lowercase keys consistently
-            spk_end = speaker_segment["end"]
-            spk_name = speaker_segment["speaker"]
+            speaker_start = speaker_segment["start"]
+            speaker_end = speaker_segment["end"]
 
-            # Calculate overlap duration
-            overlap_start = max(sentence_start, spk_start)
-            overlap_end = min(sentence_end, spk_end)
-            overlap_duration = max(0, overlap_end - overlap_start)
+            if word_start <= speaker_end and word_end >= speaker_start:
+                assigned_speaker = speaker_segment["speaker"]
+                break
 
-            # If there's an overlap and it's the longest so far, assign this speaker
-            if overlap_duration > max_overlap:
-                max_overlap = overlap_duration
-                speaker = spk_name
-
-        results.append({
-            "Speaker": speaker,
-            "Text": text,
-            "Start": round(sentence_start, 2),
-            "End": round(sentence_end, 2)
+        result.append({
+            "word": word_info["word"],
+            "start": word_info["start"],
+            "end": word_info["end"],
+            "speaker": assigned_speaker,
         })
+    return result
 
-    return results
 
 # Highlight positive and negative sentiments
 def style_table(row):
@@ -492,16 +320,9 @@ if st.button('Run Sentiment Analysis'):
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
 
-            transcription_segments = [
-                {"start": word["start"], "end": word["end"], "text": word["word"]}
-                for word in audio_results["word_timestamps"]
-            ]
-
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
-            #sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
-            #sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
+            sentences_with_speakers = assign_speakers_to_words(text_for_analysis, speaker_segments)
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
