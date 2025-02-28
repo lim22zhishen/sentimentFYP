@@ -343,19 +343,31 @@ def assign_speakers_to_sentences(transcription_segments, speaker_segments):
 
         # Default speaker is "Unknown"
         speaker = "Unknown"
+        max_overlap = 0  # Track the highest overlap duration
 
         # Check for overlap with speaker segments
         for speaker_segment in speaker_segments:
-            if sentence_start < speaker_segment["End"] and sentence_end > speaker_segment["Start"]:
-                speaker = speaker_segment["Speaker"]
-                break  # Assign the first matching speaker
+            spk_start = speaker_segment["start"]  # Use lowercase keys consistently
+            spk_end = speaker_segment["end"]
+            spk_name = speaker_segment["speaker"]
+
+            # Calculate overlap duration
+            overlap_start = max(sentence_start, spk_start)
+            overlap_end = min(sentence_end, spk_end)
+            overlap_duration = max(0, overlap_end - overlap_start)
+
+            # If there's an overlap and it's the longest so far, assign this speaker
+            if overlap_duration > max_overlap:
+                max_overlap = overlap_duration
+                speaker = spk_name
 
         results.append({
             "Speaker": speaker,
             "Text": text,
-            "Start": sentence_start,
-            "End": sentence_end
+            "Start": round(sentence_start, 2),
+            "End": round(sentence_end, 2)
         })
+
     return results
 
 # Highlight positive and negative sentiments
@@ -487,9 +499,9 @@ if st.button('Run Sentiment Analysis'):
 
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            #sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
-            sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
-            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
+            sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
+            #sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
+            #sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
