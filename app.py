@@ -8,7 +8,6 @@ import openai
 from openai import OpenAI
 import re
 from pyannote.audio import Pipeline
-import numpy as np
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 OPENAI_API_KEY = st.secrets["keys"]
@@ -230,133 +229,102 @@ def split_into_sentences(transcription, word_timestamps=None):
             
 def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
     """
-    More robust alignment of sentences with speaker diarization results.
-    
-    Args:
-        sentences: List of sentence strings
-        word_timestamps: List of word timing information from Whisper
-        speaker_segments: List of speaker segments from diarization
-    
-    Returns:
-        List of dictionaries with aligned sentences and speakers
+    Improved alignment that focuses on precise time matching between diarization and transcription.
     """
     aligned_sentences = []
     
     # Ensure speaker segments are sorted by start time
     speaker_segments = sorted(speaker_segments, key=lambda x: x['start'])
     
-    # Create a debug log
-    debug_logs = []
-    debug_logs.append(f"Aligning {len(sentences)} sentences with {len(speaker_segments)} speaker segments")
+    # For debugging - show segment boundaries
+    segment_ranges = [f"{seg['start']:.2f}-{seg['end']:.2f}: {seg['speaker']}" for seg in speaker_segments[:10]]
+    st.write("Speaker segment timeline (first 10):")
+    st.code("\n".join(segment_ranges))
     
-    # Map word timestamps to sentences
-    sentence_word_map = map_words_to_sentences(sentences, word_timestamps)
-    
-    # For each sentence, determine timing and speaker
+    # For each sentence, try to find its timing and corresponding speaker
     for i, sentence in enumerate(sentences):
-        sentence_obj = {"text": sentence, "alignment_method": "unknown"}
+        # STEP 1: Get reliable timing for this sentence
+        sentence_timing = None
         
-        # STEP 1: Get accurate timing for this sentence using multiple methods
-        sentence_timing = get_sentence_timing(i, sentence, sentence_word_map, aligned_sentences)
-        sentence_obj.update(sentence_timing)
+        # Method 1: Use word timestamps if available
+        if word_timestamps:
+            sentence_words = sentence.split()
+            matching_timestamps = []
+            
+            # Find ANY words that match between this sentence and timestamps
+            for word_info in word_timestamps:
+                word = word_info['word'].strip().lower()
+                if any(w.lower() in word or word in w.lower() for w in sentence_words):
+                    matching_timestamps.append(word_info)
+            
+            if matching_timestamps:
+                # Sort by time and take first/last
+                matching_timestamps.sort(key=lambda x: x['start'])
+                sentence_timing = {
+                    'start': matching_timestamps[0]['start'],
+                    'end': matching_timestamps[-1]['end']
+                }
         
-        # STEP 2: Determine speaker using weighted methods
-        speaker_info = determine_speaker(sentence_timing, speaker_segments)
-        sentence_obj.update(speaker_info)
+        # Method 2: Estimate based on sentence position
+        if not sentence_timing:
+            # If this is the first sentence, start at beginning
+            if i == 0:
+                start_time = 0.0
+            # Otherwise use the end of previous sentence
+            else:
+                start_time = aligned_sentences[-1]['end'] if aligned_sentences else 0.0
+                
+            # Estimate duration based on word count (avg 0.3 sec per word)
+            word_count = len(sentence.split())
+            duration = max(1.0, word_count * 0.3)
+            
+            sentence_timing = {
+                'start': start_time,
+                'end': start_time + duration
+            }
         
-        # Add detailed debug information
-        debug_info = (f"Sentence {i}: '{sentence[:30]}...' | "
-                     f"Time: {sentence_timing['start']:.2f}-{sentence_timing['end']:.2f} | "
-                     f"Speaker: {speaker_info['speaker']} | "
-                     f"Confidence: {speaker_info['confidence']:.2f} | "
-                     f"Method: {sentence_timing['method']}")
-        debug_logs.append(debug_info)
+        # STEP 2: Find which speaker segment contains this sentence
+        # Display timing for debugging
+        st.write(f"Sentence {i}: '{sentence[:40]}...' estimated time: {sentence_timing['start']:.2f}-{sentence_timing['end']:.2f}")
         
-        aligned_sentences.append(sentence_obj)
+        # Find ALL overlapping segments
+        overlapping_segments = []
+        for segment in speaker_segments:
+            # Check for overlap
+            overlap_start = max(sentence_timing['start'], segment['start'])
+            overlap_end = min(sentence_timing['end'], segment['end'])
+            
+            if overlap_end > overlap_start:
+                overlap_duration = overlap_end - overlap_start
+                overlapping_segments.append({
+                    'speaker': segment['speaker'],
+                    'duration': overlap_duration
+                })
+        
+        # Choose speaker with most overlap
+        if overlapping_segments:
+            best_match = max(overlapping_segments, key=lambda x: x['duration'])
+            speaker = best_match['speaker']
+        else:
+            # Find nearest segment if no overlap
+            mid_sentence = (sentence_timing['start'] + sentence_timing['end']) / 2
+            nearest_segment = min(speaker_segments, key=lambda x: 
+                                 min(abs(x['start'] - mid_sentence), abs(x['end'] - mid_sentence)))
+            speaker = nearest_segment['speaker']
+        
+        # Add to results
+        aligned_sentences.append({
+            'start': round(sentence_timing['start'], 2),
+            'end': round(sentence_timing['end'], 2),
+            'text': sentence,
+            'speaker': speaker
+        })
     
-    # Display summary of debug logs
-    st.write(f"Alignment completed. Debug information for first few sentences:")
-    st.code("\n".join(debug_logs[:min(5, len(debug_logs))]))
-    if len(debug_logs) > 5:
-        st.write(f"... plus {len(debug_logs)-5} more sentences")
-    
-    # Validate results
-    validate_alignment(aligned_sentences, speaker_segments)
+    st.write(f"... aligned {len(sentences)} sentences")
     
     return aligned_sentences
 
-def map_words_to_sentences(sentences, word_timestamps):
-    """
-    Map words with timestamps to sentences they belong in.
-    
-    Args:
-        sentences: List of sentence strings
-        word_timestamps: List of word timing information
-    
-    Returns:
-        Dictionary mapping sentence index to list of word timing info
-    """
-    if not word_timestamps:
-        return {}
-    
-    sentence_word_map = {i: [] for i in range(len(sentences))}
-    
-    # Preprocess sentences for better word matching
-    processed_sentences = [preprocess_text(s) for s in sentences]
-    
-    # For each word with timing, find which sentence it belongs to
-    for word_info in word_timestamps:
-        word = preprocess_text(word_info['word'])
-        
-        # Skip empty words or punctuation
-        if not word or len(word) <= 1:
-            continue
-            
-        # Find which sentence contains this word
-        best_match = -1
-        highest_score = 0
-        
-        for i, sentence in enumerate(processed_sentences):
-            # Skip sentences that already have many words mapped
-            if len(sentence_word_map[i]) > len(sentence.split()) * 1.5:
-                continue
-                
-            # Calculate match score (exact match, contains word, or word contains)
-            if word == sentence:
-                score = 1.0
-            elif word in sentence:
-                score = 0.9
-            elif any(w == word for w in sentence.split()):
-                score = 0.8
-            elif any(word in w for w in sentence.split()):
-                score = 0.5
-            else:
-                score = 0
-                
-            if score > highest_score:
-                highest_score = score
-                best_match = i
-        
-        # If we found a match, add this word to that sentence
-        if best_match >= 0 and highest_score > 0.3:
-            sentence_word_map[best_match].append(word_info)
-    
-    # Sort words within each sentence by start time
-    for i in sentence_word_map:
-        sentence_word_map[i] = sorted(sentence_word_map[i], key=lambda x: x['start'])
-    
-    return sentence_word_map
 
-def preprocess_text(text):
-    """Basic text preprocessing to improve word matching"""
-    if not text:
-        return ""
-    # Convert to lowercase, remove punctuation
-    text = text.lower()
-    text = re.sub(r'[^\w\s]', '', text)
-    text = text.strip()
-    return text
-    
 # Highlight positive and negative sentiments
 def style_table(row):
     if row["Sentiment"] == "POSITIVE":
@@ -365,180 +333,7 @@ def style_table(row):
         return ['background-color: #f8d7da'] * len(row)
     else:
         return [''] * len(row)
-
-def get_sentence_timing(index, sentence, sentence_word_map, previous_alignments):
-    """
-    Get accurate timing for a sentence using multiple methods.
-    
-    Args:
-        index: Index of the sentence
-        sentence: The sentence text
-        sentence_word_map: Mapping of sentences to word timestamps
-        previous_alignments: Previously aligned sentences
-    
-    Returns:
-        Dictionary with start, end time and confidence
-    """
-    # Method 1: Use word timestamps if available
-    if index in sentence_word_map and sentence_word_map[index]:
-        words = sentence_word_map[index]
-        start = words[0]['start']
-        end = words[-1]['end']
-        
-        # Calculate confidence based on number of words matched
-        sentence_word_count = len(sentence.split())
-        mapped_word_count = len(words)
-        confidence = min(1.0, mapped_word_count / max(1, sentence_word_count))
-        
-        return {
-            'start': start,
-            'end': end,
-            'timing_confidence': confidence,
-            'method': 'word_timestamps'
-        }
-    
-    # Method 2: Estimate based on previous sentence and average speaking rate
-    if previous_alignments:
-        prev = previous_alignments[-1]
-        start = prev['end'] + 0.1  # Small gap between sentences
-        
-        # Estimate duration based on word count and average speaking rate
-        word_count = len(sentence.split())
-        duration = max(0.5, word_count * 0.3)  # Average 0.3 seconds per word
-        end = start + duration
-        
-        return {
-            'start': start,
-            'end': end,
-            'timing_confidence': 0.5,  # Medium confidence for this method
-            'method': 'estimated_from_previous'
-        }
-    
-    # Method 3: Fallback for first sentence without timestamps
-    return {
-        'start': 0.0,
-        'end': max(1.0, len(sentence.split()) * 0.3),
-        'timing_confidence': 0.3,  # Low confidence
-        'method': 'fallback_estimate'
-    }
-
-def determine_speaker(sentence_timing, speaker_segments):
-    """
-    Determine which speaker most likely spoke this sentence.
-    
-    Args:
-        sentence_timing: Dictionary with start and end time
-        speaker_segments: List of speaker segments
-    
-    Returns:
-        Dictionary with speaker and confidence
-    """
-    start, end = sentence_timing['start'], sentence_timing['end']
-    timing_confidence = sentence_timing.get('timing_confidence', 0.5)
-    
-    # Find all overlapping segments
-    overlapping_segments = []
-    for segment in speaker_segments:
-        # Calculate overlap
-        overlap_start = max(start, segment['start'])
-        overlap_end = min(end, segment['end'])
-        
-        if overlap_end > overlap_start:
-            overlap_duration = overlap_end - overlap_start
-            sentence_duration = end - start
-            # Fraction of sentence covered by this segment
-            coverage = overlap_duration / sentence_duration
-            
-            overlapping_segments.append({
-                'speaker': segment['speaker'],
-                'overlap_duration': overlap_duration,
-                'coverage': coverage,
-                'segment': segment
-            })
-    
-    # If we found overlapping segments
-    if overlapping_segments:
-        # Sort by coverage (what fraction of the sentence this speaker covers)
-        overlapping_segments.sort(key=lambda x: x['coverage'], reverse=True)
-        best_match = overlapping_segments[0]
-        
-        # Check if we need to split the sentence (significant secondary speaker)
-        needs_split = False
-        if len(overlapping_segments) > 1:
-            second_best = overlapping_segments[1]
-            # If second speaker covers at least 30% of the sentence
-            if second_best['coverage'] > 0.3:
-                needs_split = True
-        
-        return {
-            'speaker': best_match['speaker'],
-            'confidence': best_match['coverage'] * timing_confidence,
-            'needs_split': needs_split,
-            'multiple_speakers': len(overlapping_segments) > 1
-        }
-    
-    # If no overlap, find nearest segment
-    else:
-        mid_point = (start + end) / 2
-        
-        # Sort segments by distance to sentence midpoint
-        nearest_segments = sorted(
-            speaker_segments,
-            key=lambda x: min(abs(x['start'] - mid_point), abs(x['end'] - mid_point))
-        )
-        
-        if nearest_segments:
-            nearest = nearest_segments[0]
-            # Distance from sentence to nearest segment
-            distance = min(abs(nearest['start'] - mid_point), abs(nearest['end'] - mid_point))
-            # Convert distance to confidence (closer = higher confidence)
-            # Confidence decays exponentially with distance
-            confidence = max(0.1, min(0.5, np.exp(-distance)))
-            
-            return {
-                'speaker': nearest['speaker'],
-                'confidence': confidence * timing_confidence,
-                'needs_split': False,
-                'multiple_speakers': False
-            }
-    
-    # Ultimate fallback
-    return {
-        'speaker': "Unknown Speaker",
-        'confidence': 0.1,
-        'needs_split': False,
-        'multiple_speakers': False
-    }
-
-def validate_alignment(aligned_sentences, speaker_segments):
-    """
-    Validate alignment results and report potential issues.
-    
-    Args:
-        aligned_sentences: List of aligned sentence objects
-        speaker_segments: List of speaker segments
-    """
-    # Check if any sentences need to be split due to multiple speakers
-    split_needed = [i for i, s in enumerate(aligned_sentences) if s.get('needs_split', False)]
-    if split_needed:
-        st.warning(f"{len(split_needed)} sentences might span multiple speakers and should ideally be split.")
-    
-    # Check for low confidence alignments
-    low_confidence = [i for i, s in enumerate(aligned_sentences) if s.get('confidence', 1.0) < 0.4]
-    if low_confidence:
-        st.warning(f"{len(low_confidence)} sentences have low confidence speaker assignment.")
-    
-    # Check speaker distribution
-    speaker_counts = {}
-    for s in aligned_sentences:
-        speaker = s.get('speaker', 'Unknown')
-        speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
-    
-    st.write("Speaker distribution in aligned sentences:")
-    for speaker, count in speaker_counts.items():
-        percentage = (count / len(aligned_sentences)) * 100
-        st.write(f"- {speaker}: {count} sentences ({percentage:.1f}%)")
-
+                
 # Load PyAnnote diarization pipeline
 @st.cache_resource
 def load_diarization_pipeline():
@@ -655,11 +450,7 @@ if st.button('Run Sentiment Analysis'):
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
-            sentences_with_speakers = align_sentences_with_diarization(
-                sentences, 
-                audio_results['word_timestamps'], 
-                speaker_segments
-            )
+            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
