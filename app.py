@@ -169,41 +169,7 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         "word_timestamps": word_timestamps
     }
 
-def assign_speakers_to_sentences(transcription_segments, speaker_segments):
-    """
-    Match transcription sentences with speaker segments based on overlapping timestamps.
-
-    Args:
-        transcription_segments (list): List of transcription sentences with start and end times.
-        speaker_segments (list): List of speaker segments with start and end times.
-
-    Returns:
-        list: List of sentences with assigned speakers.
-    """
-    results = []
-    for segment in transcription_segments:
-        sentence_start = segment["start"]
-        sentence_end = segment["end"]
-        text = segment["text"]
-
-        # Default speaker is "Unknown"
-        speaker = "Unknown"
-
-        # Check for overlap with speaker segments
-        for speaker_segment in speaker_segments:
-            if sentence_start < speaker_segment["End"] and sentence_end > speaker_segment["Start"]:
-                speaker = speaker_segment["Speaker"]
-                break  # Assign the first matching speaker
-
-        results.append({
-            "Speaker": speaker,
-            "Text": text,
-            "Start": sentence_start,
-            "End": sentence_end
-        })
-    return results
-    
-def split_into_sentences(transcription, word_timestamps):
+def split_into_sentences(transcription, word_timestamps=None):
     """
     Split transcription into sentences without relying on punctuation.
     Uses pauses in speech and natural language boundaries.
@@ -245,6 +211,21 @@ def split_into_sentences(transcription, word_timestamps):
             sentences.append(" ".join(current_sentence))
             
         return sentences
+    
+    # Fallback method without timestamps - use a simple length-based approach
+    else:
+        # For languages without clear word boundaries (like Chinese/Japanese)
+        if any(ord(c) > 0x4e00 and ord(c) < 0x9FFF for c in transcription):
+            # Split every ~15 characters for logographic scripts
+            char_chunks = [transcription[i:i+15] for i in range(0, len(transcription), 15)]
+            return char_chunks
+        else:
+            # Split by words for languages with spaces
+            words = transcription.split()
+            # Group into chunks of approximately 10-15 words
+            WORDS_PER_SENTENCE = 10
+            word_chunks = [words[i:i+WORDS_PER_SENTENCE] for i in range(0, len(words), WORDS_PER_SENTENCE)]
+            return [" ".join(chunk) for chunk in word_chunks]
             
 def align_sentences_with_diarization(sentences, word_timestamps, speaker_segments):
     """
@@ -265,6 +246,7 @@ def align_sentences_with_diarization(sentences, word_timestamps, speaker_segment
         # STEP 1: Get reliable timing for this sentence
         sentence_timing = None
         
+        # Method 1: Use word timestamps if available
         if word_timestamps:
             sentence_words = sentence.split()
             matching_timestamps = []
@@ -282,6 +264,24 @@ def align_sentences_with_diarization(sentences, word_timestamps, speaker_segment
                     'start': matching_timestamps[0]['start'],
                     'end': matching_timestamps[-1]['end']
                 }
+        
+        # Method 2: Estimate based on sentence position
+        if not sentence_timing:
+            # If this is the first sentence, start at beginning
+            if i == 0:
+                start_time = 0.0
+            # Otherwise use the end of previous sentence
+            else:
+                start_time = aligned_sentences[-1]['end'] if aligned_sentences else 0.0
+                
+            # Estimate duration based on word count (avg 0.3 sec per word)
+            word_count = len(sentence.split())
+            duration = max(1.0, word_count * 0.3)
+            
+            sentence_timing = {
+                'start': start_time,
+                'end': start_time + duration
+            }
         
         # STEP 2: Find which speaker segment contains this sentence
         # Display timing for debugging
@@ -449,11 +449,8 @@ if st.button('Run Sentiment Analysis'):
             
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            sentences = [seg["text"] for seg in speaker_segments]
-            sentences_with_speakers = [
-                {"speaker": seg["speaker"], "text": seg["text"]}
-                for seg in speaker_segments
-            ]
+            sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
+            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
@@ -495,7 +492,7 @@ if st.button('Run Sentiment Analysis'):
             st.write("Attempting sentiment analysis on whole transcript without speaker diarization...")
             
             # Fallback: analyze whole transcript
-            sentences = split_into_sentences(text_for_analysis,word_timestamps=None)
+            sentences = split_into_sentences(text_for_analysis)
             sentiments = batch_analyze_sentiments(sentences)
             
             results = []
