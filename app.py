@@ -375,6 +375,11 @@ if st.button('Run Sentiment Analysis'):
         
         # Speaker Diarization with improved function
         st.write("Performing Speaker Diarization...")
+
+        diarization_pipeline = load_diarization_pipeline()
+        speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
+        sentences_with_speakers = assign_speakers_to_words(audio_results, speaker_segments)
+        st.write("Sentences with Speakers:", sentences_with_speakers)
         try:
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
@@ -411,9 +416,7 @@ if st.button('Run Sentiment Analysis'):
             df = pd.DataFrame(results)
             st.write("Final Analysis:")
             st.dataframe(df)
-
-            st.write("DataFrame Columns:", df.columns)
-            st.write("Results List:", results)
+            
             # For your visualization:
             fig = px.line(df, x=df.index, y="Score", color="Speaker", title="Sentiment Score Over Time")
             st.plotly_chart(fig)
@@ -435,8 +438,6 @@ if st.button('Run Sentiment Analysis'):
                     "Score": round(sentiment["score"], 2)
                 })
 
-            st.write("DataFrame Columns:", df.columns)
-            st.write("Results List:", results)
             df = pd.DataFrame(results)
             st.write("Basic Sentiment Analysis (without speaker identification):")
             st.dataframe(df)
