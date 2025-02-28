@@ -169,7 +169,7 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         "word_timestamps": word_timestamps
     }
 
-def split_into_sentences(transcription, word_timestamps=None):
+def split_into_sentences(transcription, word_timestamps):
     """
     Split transcription into sentences without relying on punctuation.
     Uses pauses in speech and natural language boundaries.
