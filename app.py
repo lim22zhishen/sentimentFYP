@@ -487,9 +487,9 @@ if st.button('Run Sentiment Analysis'):
 
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
-            #sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
-            #sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
+            #sentences_with_speakers = assign_speakers_to_sentences(transcription_segments, speaker_segments)
+            sentences = split_into_sentences(text_for_analysis, audio_results['word_timestamps'])
+            sentences_with_speakers = align_sentences_with_diarization(sentences, audio_results['word_timestamps'], speaker_segments)
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
