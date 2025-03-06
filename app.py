@@ -266,6 +266,7 @@ def assign_speakers_to_words(audio_results, speaker_segments):
             "speaker": assigned_speaker,
         })
 
+    st.write("Aligned Words with Speakers:")
     st.json(result)
     return result
 
