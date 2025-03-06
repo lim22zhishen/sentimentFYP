@@ -404,6 +404,7 @@ if st.button('Run Sentiment Analysis'):
             st.write(f"Unique speakers in final results: {', '.join(unique_result_speakers)}")
             
             df = pd.DataFrame(results)
+            df = df.style.apply(style_table, axis=1)
             st.write("Final Analysis:")
             st.dataframe(df)
             
@@ -429,6 +430,7 @@ if st.button('Run Sentiment Analysis'):
                 })
 
             df = pd.DataFrame(results)
+            df = df.style.apply(style_table, axis=1)
             st.write("Basic Sentiment Analysis (without speaker identification):")
             st.dataframe(df)
     
