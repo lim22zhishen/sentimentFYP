@@ -366,7 +366,8 @@ if st.button('Run Sentiment Analysis'):
                 text_for_analysis = audio_results['transcription']
         else:
             text_for_analysis = audio_results['transcription']
-        
+
+        st.write(text_for_analysis)
         # Speaker Diarization with improved function
         st.write("Performing Speaker Diarization...")
 
@@ -377,13 +378,11 @@ if st.button('Run Sentiment Analysis'):
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
-            st.json(sentences_with_speakers)
+
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
-            messages = [audio_results['translation'] if audio_results['translation'] else s["text"] for s in sentences_with_speakers]
 
-            st.json(messages)
             sentiments = batch_analyze_sentiments(messages)
             
             # When preparing the final results DataFrame
