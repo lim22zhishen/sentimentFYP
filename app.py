@@ -224,6 +224,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
     
     sentence_timestamps = audio_results.get("sentence_timestamps", [])
     translated_texts = audio_results.get("translation", None)
+    st.write(translated_texts)
     result = []
     
     if not sentence_timestamps or not speaker_segments:
