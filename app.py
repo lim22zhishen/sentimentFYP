@@ -201,7 +201,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
                 translated_text = translation_response["choices"][0]["message"]["content"]
                 st.write(f"Original: {sentence_info['text']} → Translation: {translated_text}") 
             except Exception as e:
-                st.write(f"Original: {sentence_info['text']} → Translation: {translated_text}") 
+                st.write(f"Translation failed for '{sentence_info['text']}': {e}") 
                 translated_text = None  # Fallback to None if translation fails
 
         # Append sentence with its assigned speaker and translation
