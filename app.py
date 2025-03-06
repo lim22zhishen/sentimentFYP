@@ -84,8 +84,6 @@ def diarize_audio(diarization_pipeline, audio_file):
             mapped_segment["original_speaker"] = segment["speaker"]
             mapped_segment["speaker"] = speaker_map.get(segment["speaker"], segment["speaker"])
             mapped_segments.append(mapped_segment)
-        st.write("Debug Output:")
-        st.json(mapped_segments)  # Pretty prints the result
 
         return mapped_segments
         
@@ -398,6 +396,10 @@ if st.button('Run Sentiment Analysis'):
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_words(audio_results, speaker_segments)
+            
+            # Display the output in Streamlit
+            st.write("Aligned Words with Speakers:")
+            st.json(sentences_with_speakers)  # This will show a nicely formatted JSON output
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
