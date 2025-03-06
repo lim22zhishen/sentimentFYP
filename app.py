@@ -24,6 +24,15 @@ sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncas
 def scale_score(label, score):
     return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
 
+def remove_first_sentence(text):
+    # Split sentences based on punctuation (better than just splitting by newlines)
+    sentences = re.split(r'(?<=[.!?])\s+', text, maxsplit=1)
+    
+    if len(sentences) > 2:
+        return sentences[2]  # Return everything except the first sentence
+    return text  # Return original if only one sentence exists
+
+
 # Function to analyze sentiment in batches
 def batch_analyze_sentiments(messages):
     results = sentiment_pipeline(messages)
@@ -358,12 +367,8 @@ if st.button('Run Sentiment Analysis'):
         # Display translation if available
         if audio_results['translation']:
             st.write("### English Translation:")
-            st.text_area("Translation", audio_results['translation'], height=200)
-            # If the translation exists, use it if it's in English
-            if audio_results['primary_language'] == "en":
-                text_for_analysis = audio_results['translation']
-            else:
-                text_for_analysis = audio_results['transcription']
+            st.text_area("Translation", remove_first_two_sentences(audio_results['translation']), height=200)
+            text_for_analysis = remove_first_two_sentences(audio_results['translation'])
         else:
             text_for_analysis = audio_results['transcription']
 
