@@ -404,8 +404,9 @@ if st.button('Run Sentiment Analysis'):
             st.write(f"Unique speakers in final results: {', '.join(unique_result_speakers)}")
             
             df = pd.DataFrame(results)
+            styled_df = df.style.apply(style_table, axis=1)
             st.write("Final Analysis:")
-            st.dataframe(df)
+            st.dataframe(styled_df)
             
             # For your visualization:
             fig = px.line(df, x=df.index, y="Score", color="Speaker", title="Sentiment Score Over Time")
@@ -429,8 +430,9 @@ if st.button('Run Sentiment Analysis'):
                 })
 
             df = pd.DataFrame(results)
+            styled_df = df.style.apply(style_table, axis=1)
             st.write("Basic Sentiment Analysis (without speaker identification):")
-            st.dataframe(df)
+            st.dataframe(styled_df)
     
         # Clean up
         os.remove(temp_file_path)
