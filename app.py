@@ -105,7 +105,8 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         response = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            response_format="verbose_json"
+            response_format="verbose_json",
+            word_timestamps=True
         )
     
     transcription = response.text
@@ -232,8 +233,6 @@ def assign_speakers_to_words(audio_results, speaker_segments):
     """Assigns speakers to words based on timestamps with better alignment handling."""
     
     word_timestamps = audio_results.get("word_timestamps", [])
-    st.wirte("Timestamps:")
-    st.json(word_timestamps)
     result = []
     
     if not word_timestamps or not speaker_segments:
