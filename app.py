@@ -223,6 +223,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
     """Assigns speakers to sentences based on timestamps with improved alignment handling."""
     
     sentence_timestamps = audio_results.get("sentence_timestamps", [])
+    translated_texts = audio_results.get("translated_sentences", None)
     result = []
     
     if not sentence_timestamps or not speaker_segments:
@@ -249,13 +250,19 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
                     best_overlap = overlap
                     assigned_speaker = speaker_segment["speaker"]
 
-        # Append sentence with its assigned speaker
-        result.append({
+        # Build the result dictionary
+        sentence_entry = {
             "text": sentence_info["text"],
             "start": sentence_start,
             "end": sentence_end,
             "speaker": assigned_speaker,
-        })
+        }
+
+        # Only include translation if it exists and is a valid list
+        if translated_texts and isinstance(translated_texts, list) and i < len(translated_texts):
+            sentence_entry["translation"] = translated_texts[i]
+
+        result.append(sentence_entry)
     
     return result
 
@@ -368,9 +375,6 @@ if st.button('Run Sentiment Analysis'):
         if audio_results['translation']:
             st.write("### English Translation:")
             st.text_area("Translation", remove_first_two_sentences(audio_results['translation']), height=200)
-            text_for_analysis = remove_first_two_sentences(audio_results['translation'])
-        else:
-            text_for_analysis = audio_results['transcription']
 
         st.write(text_for_analysis)
         # Speaker Diarization with improved function
@@ -388,7 +392,8 @@ if st.button('Run Sentiment Analysis'):
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
 
-            sentiments = batch_analyze_sentiments(messages)
+            text_for_analysis = [s["translation"] if "translation" in s else s["text"] for s in sentences_with_speakers]
+            sentiments = batch_analyze_sentiments(text_for_analysis)
             
             # When preparing the final results DataFrame
             results = []
