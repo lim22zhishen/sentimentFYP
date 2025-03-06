@@ -363,7 +363,8 @@ if st.button('Run Sentiment Analysis'):
         # Process audio with enhanced multilanguage capability
         st.write("Processing audio...")
         audio_results = handle_multilanguage_audio(temp_file_path)
-        
+
+        st.json(audio_results)
         # Display language information
         st.write(f"Primary Language: **{audio_results['primary_language']}**")
         
