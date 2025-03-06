@@ -44,10 +44,6 @@ def diarize_audio(diarization_pipeline, audio_file):
         speaker_segments = []
         unique_speakers = set()
         
-        # Debug: Print raw diarization results
-        st.write("Raw diarization segments:")
-        debug_segments = []
-        
         for segment, _, speaker in diarization_result.itertracks(yield_label=True):
             # Store the exact speaker label from PyAnnote
             speaker_id = speaker  # Keep original ID (like "SPEAKER_00", "SPEAKER_01")
@@ -59,12 +55,7 @@ def diarize_audio(diarization_pipeline, audio_file):
                 "speaker": speaker_id
             }
             speaker_segments.append(segment_info)
-            debug_segments.append(f"{segment.start:.2f}-{segment.end:.2f}: {speaker_id}")
-        
-        # Display debug info
-        st.code("\n".join(debug_segments[:10]) + 
-                (f"\n... plus {len(debug_segments)-10} more segments" if len(debug_segments) > 10 else ""))
-        
+    
         st.success(f"Diarization complete. Found {len(unique_speakers)} unique speakers and {len(speaker_segments)} speech segments.")
         
         # Map speaker IDs to more user-friendly names (optional)
@@ -72,10 +63,6 @@ def diarize_audio(diarization_pipeline, audio_file):
         for i, speaker in enumerate(sorted(unique_speakers)):
             speaker_map[speaker] = f"Speaker {i+1}"
         
-        # Show speaker mapping
-        st.write("Speaker mapping:")
-        for original, mapped in speaker_map.items():
-            st.write(f"{original} → {mapped}")
         
         # Map the speaker IDs in the segments (optional)
         mapped_segments = []
@@ -89,8 +76,6 @@ def diarize_audio(diarization_pipeline, audio_file):
         
     except Exception as e:
         st.error(f"Speaker diarization failed: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
         return [{"start": 0.0, "end": 1000.0, "speaker": "Speaker 1"}]
 
 def handle_multilanguage_audio(audio_file_path, target_language="english"):
@@ -389,8 +374,6 @@ if st.button('Run Sentiment Analysis'):
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
 
-            st.json(speaker_segments)
-            st.json(audio_results)
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
