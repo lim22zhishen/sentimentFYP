@@ -191,7 +191,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
         # Translate if the primary language is not English
         if primary_language != "en":
             try:
-                translation_response = openai.ChatCompletion.create(
+                translation_response = client.chat.completions.create(
                     model="gpt-4",
                     messages=[
                         {"role": "system", "content": "Translate the following text to English."},
@@ -203,7 +203,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
             except Exception as e:
                 st.write(f"Translation failed for '{sentence_info['text']}': {e}") 
                 translated_text = None  # Fallback to None if translation fails
-
+        
         # Append sentence with its assigned speaker and translation
         result.append({
             "text": sentence_info["text"],
