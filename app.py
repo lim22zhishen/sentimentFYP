@@ -232,6 +232,7 @@ def assign_speakers_to_words(audio_results, speaker_segments):
     """Assigns speakers to words based on timestamps with better alignment handling."""
     
     word_timestamps = audio_results.get("word_timestamps", [])
+    st.json(word_timestamps)
     result = []
     
     if not word_timestamps or not speaker_segments:
