@@ -198,7 +198,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
                         {"role": "user", "content": sentence_info["text"]}
                     ]
                 )
-                translated_text = translation_response["choices"][0]["message"]["content"]
+                translated_text = translation_response.choices[0].message.content  
                 st.write(f"Original: {sentence_info['text']} → Translation: {translated_text}") 
             except Exception as e:
                 st.write(f"Translation failed for '{sentence_info['text']}': {e}") 
