@@ -85,7 +85,7 @@ def diarize_audio(diarization_pipeline, audio_file):
             mapped_segment["speaker"] = speaker_map.get(segment["speaker"], segment["speaker"])
             mapped_segments.append(mapped_segment)
         st.write("Debug Output:")
-    st.json(mapped_segments)  # Pretty prints the result
+        st.json(mapped_segments)  # Pretty prints the result
 
         return mapped_segments
         
