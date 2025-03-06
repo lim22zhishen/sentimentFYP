@@ -223,7 +223,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
     """Assigns speakers to sentences based on timestamps with improved alignment handling."""
     
     sentence_timestamps = audio_results.get("sentence_timestamps", [])
-    translated_texts = audio_results.get("translated_sentences", None)
+    translated_texts = audio_results.get("translation", None)
     result = []
     
     if not sentence_timestamps or not speaker_segments:
