@@ -1,4 +1,3 @@
-messages = [audio_results['translation'] if audio_results['translation'] else s["text"] for s in sentences_with_speakers]
 import streamlit as st
 import os
 import datetime
@@ -382,6 +381,8 @@ if st.button('Run Sentiment Analysis'):
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
+            messages = [audio_results['translation'] if audio_results['translation'] else s["text"] for s in sentences_with_speakers]
+
             st.json(messages)
             sentiments = batch_analyze_sentiments(messages)
             
