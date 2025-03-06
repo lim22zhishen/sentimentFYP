@@ -271,7 +271,8 @@ def load_diarization_pipeline():
 st.title("Audio Transcription and Sentiment Analysis App")
 
 # Input section for customer service conversation or audio file
-input_type = st.radio("Select Input Type", ("Text", "Audio"))
+input_type = st.radio("Select Input Type", ("Text", "Audio"), index=1)  # 0 = "Text", 1 = "Audio"
+
 
 if input_type == "Text":
     st.write("Enter a customer service conversation (each line is a new interaction between customer and service agent):")
