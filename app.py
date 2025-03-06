@@ -350,7 +350,6 @@ if st.button('Run Sentiment Analysis'):
         
         if audio_results['multiple_languages_detected']:
             st.write("### Multiple Languages Detected")
-            st.write(audio_results['language_analysis'])
         
         # Display original transcription
         st.write("### Original Transcription:")
