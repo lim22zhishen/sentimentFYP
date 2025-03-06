@@ -392,7 +392,7 @@ if st.button('Run Sentiment Analysis'):
 
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
-            sentences_with_speakers = assign_speakers_to_words(audio_results, speaker_segments)
+            sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
             
             # Display the output in Streamlit
             st.write("Aligned Words with Speakers:")
