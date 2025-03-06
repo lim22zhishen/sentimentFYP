@@ -24,14 +24,10 @@ sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncas
 def scale_score(label, score):
     return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
 
-def remove_first_two_sentences(text):
-    # Split sentences based on punctuation (better than just splitting by newlines)
-    sentences = re.split(r'(?<=[.!?])\s+', text, maxsplit=1)
-    
-    if len(sentences) > 2:
-        return sentences[2]  # Return everything except the first sentence
-    return text  # Return original if only one sentence exists
-
+def extract_text_within_quotes(text):
+    """Extracts and returns only the content inside double quotation marks."""
+    matches = re.findall(r'"(.*?)"', text)  # Find all text inside double quotes
+    return " ".join(matches) if matches else text  # Join if multiple matches, else return original text
 
 # Function to analyze sentiment in batches
 def batch_analyze_sentiments(messages):
@@ -223,8 +219,7 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
     """Assigns speakers to sentences based on timestamps with improved alignment handling."""
     
     sentence_timestamps = audio_results.get("sentence_timestamps", [])
-    translated_texts = audio_results.get("translation", None)
-    st.write(translated_texts)
+    primary_language = audio_results.get("primary_language", "unknown")
     result = []
     
     if not sentence_timestamps or not speaker_segments:
@@ -251,19 +246,30 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
                     best_overlap = overlap
                     assigned_speaker = speaker_segment["speaker"]
 
-        # Build the result dictionary
-        sentence_entry = {
+        translated_text = None
+
+        # Translate if the primary language is not English
+        if primary_language != "en":
+            try:
+                translation_response = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "Translate the following text to English."},
+                        {"role": "user", "content": sentence_info["text"]}
+                    ]
+                )
+                translated_text = translation_response["choices"][0]["message"]["content"]
+            except Exception as e:
+                translated_text = None  # Fallback to None if translation fails
+
+        # Append sentence with its assigned speaker and translation
+        result.append({
             "text": sentence_info["text"],
+            "translation": translated_text if translated_text else None,
             "start": sentence_start,
             "end": sentence_end,
             "speaker": assigned_speaker,
-        }
-
-        # Only include translation if it exists and is a valid list
-        if translated_texts and isinstance(translated_texts, list) and i < len(translated_texts):
-            sentence_entry["translation"] = translated_texts[i]
-
-        result.append(sentence_entry)
+        })
     
     return result
 
@@ -375,7 +381,7 @@ if st.button('Run Sentiment Analysis'):
         # Display translation if available
         if audio_results['translation']:
             st.write("### English Translation:")
-            st.text_area("Translation", remove_first_two_sentences(audio_results['translation']), height=200)
+            st.text_area("Translation", extract_text_within_quotes(audio_results['translation']), height=200)
 
         # Speaker Diarization with improved function
         st.write("Performing Speaker Diarization...")
@@ -393,6 +399,7 @@ if st.button('Run Sentiment Analysis'):
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
 
+            st.json(messages)
             text_for_analysis = [s["translation"] if "translation" in s else s["text"] for s in sentences_with_speakers]
             sentiments = batch_analyze_sentiments(text_for_analysis)
             
