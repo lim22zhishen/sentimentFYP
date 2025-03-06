@@ -359,7 +359,6 @@ if st.button('Run Sentiment Analysis'):
         st.write("Processing audio...")
         audio_results = handle_multilanguage_audio(temp_file_path)
 
-        st.json(audio_results)
         # Display language information
         st.write(f"Primary Language: **{audio_results['primary_language']}**")
         
@@ -390,14 +389,12 @@ if st.button('Run Sentiment Analysis'):
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
 
+            st.json(speaker_segments)
+            st.json(audio_results)
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
             
-            # Display the output in Streamlit
-            st.write("Aligned Words with Speakers:")
-            st.json(sentences_with_speakers)  # This will show a nicely formatted JSON output
-
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
