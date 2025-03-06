@@ -383,7 +383,6 @@ if st.button('Run Sentiment Analysis'):
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
             st.json(messages)
-            #messages = [audio_results['translation'] if audio_results['translation'] else s["text"] for s in sentences_with_speakers]
             sentiments = batch_analyze_sentiments(messages)
             
             # When preparing the final results DataFrame
