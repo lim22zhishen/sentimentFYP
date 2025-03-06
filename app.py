@@ -376,7 +376,6 @@ if st.button('Run Sentiment Analysis'):
             st.write("### English Translation:")
             st.text_area("Translation", remove_first_two_sentences(audio_results['translation']), height=200)
 
-        st.write(text_for_analysis)
         # Speaker Diarization with improved function
         st.write("Performing Speaker Diarization...")
 
@@ -388,6 +387,7 @@ if st.button('Run Sentiment Analysis'):
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
 
+            st.json(sentences_with_speakers)
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
