@@ -24,7 +24,7 @@ sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncas
 def scale_score(label, score):
     return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
 
-def remove_first_two_sentence(text):
+def remove_first_two_sentences(text):
     # Split sentences based on punctuation (better than just splitting by newlines)
     sentences = re.split(r'(?<=[.!?])\s+', text, maxsplit=1)
     
