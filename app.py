@@ -231,10 +231,12 @@ def split_into_sentences(transcription, word_timestamps=None):
 
 
 def assign_speakers_to_words(audio_results, speaker_segments):
-    """Assigns speakers to words based on timestamps."""
-    word_timestamps = audio_results['word_timestamps']
+    """Assigns speakers to words based on timestamps with better alignment handling."""
+    
+    word_timestamps = audio_results.get("word_timestamps", [])
     result = []
-    if not word_timestamps:
+    
+    if not word_timestamps or not speaker_segments:
         return []
 
     for word_info in word_timestamps:
@@ -242,21 +244,32 @@ def assign_speakers_to_words(audio_results, speaker_segments):
         word_end = word_info["end"]
         assigned_speaker = "Unknown Speaker"
 
+        best_overlap = 0  # Track the best overlap duration for speaker assignment
+
         for speaker_segment in speaker_segments:
             speaker_start = speaker_segment["start"]
             speaker_end = speaker_segment["end"]
 
+            # Check if word falls inside or overlaps with the speaker segment
             if word_start <= speaker_end and word_end >= speaker_start:
-                assigned_speaker = speaker_segment["speaker"]
-                break
+                # Calculate overlap duration
+                overlap = min(word_end, speaker_end) - max(word_start, speaker_start)
 
+                # Assign the speaker with the longest overlap
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    assigned_speaker = speaker_segment["speaker"]
+
+        # Append word with its assigned speaker
         result.append({
             "word": word_info["word"],
-            "start": word_info["start"],
-            "end": word_info["end"],
+            "start": word_start,
+            "end": word_end,
             "speaker": assigned_speaker,
         })
+
     return result
+
 
 
 # Highlight positive and negative sentiments
