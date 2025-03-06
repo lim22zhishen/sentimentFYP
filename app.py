@@ -99,34 +99,31 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
     1. Transcribe using Whisper (which can handle multiple languages)
     2. Detect language segments if needed
     3. Translate each segment appropriately
+    4. Return sentence-level timestamps instead of word timestamps
     """
-    # Initial transcription
+    # Initial transcription using Whisper API
     with open(audio_file_path, "rb") as audio_file:
         response = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            response_format="verbose_json",
-            word_timestamps=True
+            response_format="verbose_json"
         )
     
     transcription = response.text
     primary_language = getattr(response, 'language', 'unknown')
-    
-    # Extract word-level timestamps
-    word_timestamps = []
+
+    # Extract sentence-level (segment) timestamps
+    sentence_timestamps = []
     if hasattr(response, 'segments') and response.segments:
         for segment in response.segments:
-            if hasattr(segment, 'words'):
-                for word in segment.words:
-                    word_timestamps.append({
-                        "word": word.word,
-                        "start": word.start,
-                        "end": word.end
-                    })
+            sentence_timestamps.append({
+                "text": segment.text,
+                "start": segment.start,
+                "end": segment.end
+            })
     
-    # Analyze for potential multiple languages (can be enhanced with more sophisticated detection)
+    # Analyze for potential multiple languages
     try:
-        # Use GPT to detect if there might be multiple languages
         language_analysis = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -136,7 +133,6 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         )
         language_analysis_result = language_analysis.choices[0].message.content
         
-        # Check if multiple languages were detected
         multiple_languages_detected = "multiple languages" in language_analysis_result.lower() or "different languages" in language_analysis_result.lower()
         
         if multiple_languages_detected:
@@ -149,11 +145,10 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
     translated_text = None
     if primary_language != 'en':
         try:
-            translation_prompt = "Translate the following text to English. If there are multiple languages present, identify each language and translate all of it."
             translation_response = client.chat.completions.create(
-                model="gpt-4",  # Using a more powerful model for multilingual translation
+                model="gpt-4",
                 messages=[
-                    {"role": "system", "content": translation_prompt},
+                    {"role": "system", "content": "Translate the following text to English. If there are multiple languages present, identify each language and translate all of it."},
                     {"role": "user", "content": transcription}
                 ]
             )
@@ -167,8 +162,9 @@ def handle_multilanguage_audio(audio_file_path, target_language="english"):
         "multiple_languages_detected": multiple_languages_detected,
         "language_analysis": language_analysis_result if multiple_languages_detected else None,
         "translation": translated_text,
-        "word_timestamps": word_timestamps
+        "sentence_timestamps": sentence_timestamps  # Returns segment-level timestamps
     }
+
 
 def split_into_sentences(transcription, word_timestamps=None):
     """
