@@ -225,18 +225,18 @@ def split_into_sentences(transcription, word_timestamps=None):
             return [" ".join(chunk) for chunk in word_chunks]
 
 
-def assign_speakers_to_words(audio_results, speaker_segments):
-    """Assigns speakers to words based on timestamps with better alignment handling."""
+def assign_speakers_to_sentences(audio_results, speaker_segments):
+    """Assigns speakers to sentences based on timestamps with improved alignment handling."""
     
-    word_timestamps = audio_results.get("word_timestamps", [])
+    sentence_timestamps = audio_results.get("sentence_timestamps", [])
     result = []
     
-    if not word_timestamps or not speaker_segments:
+    if not sentence_timestamps or not speaker_segments:
         return []
 
-    for word_info in word_timestamps:
-        word_start = word_info["start"]
-        word_end = word_info["end"]
+    for sentence_info in sentence_timestamps:
+        sentence_start = sentence_info["start"]
+        sentence_end = sentence_info["end"]
         assigned_speaker = "Unknown Speaker"
 
         best_overlap = 0  # Track the best overlap duration for speaker assignment
@@ -245,25 +245,25 @@ def assign_speakers_to_words(audio_results, speaker_segments):
             speaker_start = speaker_segment["start"]
             speaker_end = speaker_segment["end"]
 
-            # Check if word falls inside or overlaps with the speaker segment
-            if word_start <= speaker_end and word_end >= speaker_start:
+            # Check if the sentence falls inside or overlaps with the speaker segment
+            if sentence_start <= speaker_end and sentence_end >= speaker_start:
                 # Calculate overlap duration
-                overlap = min(word_end, speaker_end) - max(word_start, speaker_start)
+                overlap = min(sentence_end, speaker_end) - max(sentence_start, speaker_start)
 
                 # Assign the speaker with the longest overlap
                 if overlap > best_overlap:
                     best_overlap = overlap
                     assigned_speaker = speaker_segment["speaker"]
 
-        # Append word with its assigned speaker
+        # Append sentence with its assigned speaker
         result.append({
-            "word": word_info["word"],
-            "start": word_start,
-            "end": word_end,
+            "text": sentence_info["text"],
+            "start": sentence_start,
+            "end": sentence_end,
             "speaker": assigned_speaker,
         })
+    
     return result
-
 
 
 # Highlight positive and negative sentiments
