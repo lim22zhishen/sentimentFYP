@@ -232,6 +232,7 @@ def assign_speakers_to_words(audio_results, speaker_segments):
     """Assigns speakers to words based on timestamps with better alignment handling."""
     
     word_timestamps = audio_results.get("word_timestamps", [])
+    st.wirte("Timestamps:")
     st.json(word_timestamps)
     result = []
     
@@ -266,10 +267,6 @@ def assign_speakers_to_words(audio_results, speaker_segments):
             "end": word_end,
             "speaker": assigned_speaker,
         })
-
-    st.write("GUILINMA:")
-    st.write("Aligned Words with Speakers:")
-    st.json(result)
     return result
 
 
