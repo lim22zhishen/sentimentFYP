@@ -336,7 +336,7 @@ if st.button('Run Sentiment Analysis'):
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
 
-            st.json(sentences_with_speakers)
+
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
