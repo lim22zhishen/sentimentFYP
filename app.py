@@ -7,7 +7,11 @@ import plotly.express as px
 import openai
 from openai import OpenAI
 import re
+import tempfile
 from pyannote.audio import Pipeline
+from pydub import AudioSegment
+import subprocess
+
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 OPENAI_API_KEY = st.secrets["keys"]
@@ -213,7 +217,31 @@ def assign_speakers_to_sentences(audio_results, speaker_segments):
     
     return result
 
-
+def process_audio_file(uploaded_file):
+    # Get file extension from the uploaded file
+    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+    
+    # Create a temp file with the original extension
+    temp_file_path = f"temp_audio{file_extension}"
+    
+    # Save the uploaded file
+    with open(temp_file_path, "wb") as f:
+        f.write(uploaded_file.read())
+    
+    # Convert to wav if needed for processing
+    if file_extension not in ['.wav']:
+        try:
+            # Use ffmpeg to convert to wav format for processing
+            wav_path = "temp_audio.wav"
+            subprocess.run(['ffmpeg', '-i', temp_file_path, '-ar', '16000', '-ac', '1', wav_path], 
+                           check=True, capture_output=True)
+            os.remove(temp_file_path)  # Remove the original temp file
+            temp_file_path = wav_path  # Update the path to the converted file
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Failed to convert audio: {e.stderr.decode()}")
+    
+    return temp_file_path
+    
 # Highlight positive and negative sentiments
 def style_table(row):
     if row["Sentiment"] == "POSITIVE":
@@ -298,10 +326,18 @@ if st.button('Run Sentiment Analysis'):
         st.plotly_chart(fig)
         
     elif input_type == "Audio" and uploaded_file:
-        temp_file_path = "temp_audio.wav"
-        with open(temp_file_path, "wb") as f:
-            f.write(uploaded_file.read())
-        
+        file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+        temp_file_path = process_audio_file(uploaded_file)
+
+        # Display the audio with the appropriate format
+        audio_format = "audio/wav"  # Default
+        if file_extension in ['.mp3']:
+            audio_format = "audio/mp3"
+        elif file_extension in ['.ogg', '.oga']:
+            audio_format = "audio/ogg"
+        elif file_extension in ['.m4a']:
+            audio_format = "audio/mp4"
+            
         st.audio(temp_file_path, format="audio/wav")
         
         # Process audio with enhanced multilanguage capability
