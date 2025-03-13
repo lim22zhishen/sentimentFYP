@@ -9,7 +9,7 @@ from openai import OpenAI
 import re
 from pyannote.audio import Pipeline
 import subprocess
-
+import json
 
 HUGGINGFACE_TOKEN = st.secrets['token']
 OPENAI_API_KEY = st.secrets["keys"]
@@ -21,10 +21,6 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Use a smaller and lighter model (distilbert instead of XLM-Roberta)
 sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-
-# Function to scale sentiment scores
-def scale_score(label, score):
-    return 5 * (score - 0.5) / 0.5 if label == "POSITIVE" else -5 * (1 - score) / 0.5
 
 def extract_text_within_quotes(text):
     """Extracts and returns only the content inside double quotation marks."""
@@ -42,33 +38,33 @@ def analyze_sentiment_openai(text):
             messages=[
                 {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
                 Analyze each sentence separately and return a structured JSON output. \
-                Each sentence should have its sentiment label (Positive, Neutral, or Negative) and a confidence score (0 to 1)."},
+                Each sentence should have its sentiment label (POSITIVE, NEUTRAL, or NEGATIVE) and a confidence score (0 to 1)."},
                 {"role": "user", "content": f"Text:\n{text}\n\nProvide output as a JSON array with 'sentence', 'sentiment', and 'confidence' fields."}
             ]
         )
-
         # Extract response content
         sentiment_results = response.choices[0].message.content.strip()
-
+        
         # Convert JSON output into a Python dictionary
-        import json
+        
         results = json.loads(sentiment_results)
-
         return results  # Returns a list of sentence-wise sentiment analysis
-
+        
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON response: {e}")
+        print(f"Raw response: {sentiment_results}")
+        return []  # Return empty list on JSON parsing failure
+        
     except Exception as e:
         print(f"Error in sentiment analysis: {e}")
-        return []
-    except Exception as e:
-        print(f"Error in sentiment analysis: {e}")
-        return {"label": "Neutral", "score": 0.5}  # Default fallback
+        return []  # Return empty list for any other errors
 
 
 # Function to analyze sentiment in batches
 def batch_analyze_sentiments(messages):
     results = sentiment_pipeline(messages)
     sentiments = [
-        {"label": res["label"], "score": scale_score(res["label"], res["score"])}
+        {"label": res["label"], "score": res["score"]}
         for res in results
     ]
     return sentiments
