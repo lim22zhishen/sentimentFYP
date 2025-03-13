@@ -31,6 +31,39 @@ def extract_text_within_quotes(text):
     matches = re.findall(r'"(.*?)"', text)  # Find all text inside double quotes
     return " ".join(matches) if matches else text  # Join if multiple matches, else return original text
 
+def analyze_sentiment_openai(text):
+    """
+    Uses OpenAI API (GPT-4) to analyze sentiment for a full conversation.
+    GPT will split and analyze sentences individually.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
+                Analyze each sentence separately and return a structured JSON output. \
+                Each sentence should have its sentiment label (Positive, Neutral, or Negative) and a confidence score (0 to 1)."},
+                {"role": "user", "content": f"Text:\n{text}\n\nProvide output as a JSON array with 'sentence', 'sentiment', and 'confidence' fields."}
+            ]
+        )
+
+        # Extract response content
+        sentiment_results = response.choices[0].message.content.strip()
+
+        # Convert JSON output into a Python dictionary
+        import json
+        results = json.loads(sentiment_results)
+
+        return results  # Returns a list of sentence-wise sentiment analysis
+
+    except Exception as e:
+        print(f"Error in sentiment analysis: {e}")
+        return []
+    except Exception as e:
+        print(f"Error in sentiment analysis: {e}")
+        return {"label": "Neutral", "score": 0.5}  # Default fallback
+
+
 # Function to analyze sentiment in batches
 def batch_analyze_sentiments(messages):
     results = sentiment_pipeline(messages)
@@ -273,34 +306,31 @@ elif input_type == "Audio":
 # Add a button to run the analysis
 if st.button('Run Sentiment Analysis'):
     if input_type == "Text" and conversation:
-        # Process the text input
-        messages = [msg.strip() for msg in conversation.split("\n") if msg.strip()]
 
-        # Limit processing of large conversations (for memory optimization)
-        MAX_MESSAGES = 20  # Only process up to 20 messages at once
-        if len(messages) > MAX_MESSAGES:
-            st.warning(f"Only analyzing the first {MAX_MESSAGES} messages for memory efficiency.")
-            messages = messages[:MAX_MESSAGES]
-
-        # Analyze each message for sentiment in batches
-        sentiments = batch_analyze_sentiments(messages)
+        # Analyze sentiment using OpenAI API
+        st.write("Performing Sentiment Analysis...")
+        sentiment_results = analyze_sentiment_openai(conversation)
 
         # Create structured data
         results = []
-        for i, msg in enumerate(messages):
-            # Split each message into speaker and content
-            if ": " in msg:
-                speaker, content = msg.split(": ", 1)
+        # Modify loop to assign timestamps based on message order
+        for i, item in enumerate(sentiment_results):
+            sentence = item["sentence"]
+            sentiment = item["sentiment"]
+            confidence = item["confidence"]
+        
+            # Extract speaker if available
+            if ": " in sentence:
+                speaker, content = sentence.split(": ", 1)
             else:
-                speaker, content = "Unknown", msg
-
-            sentiment = sentiments[i]
+                speaker, content = "Unknown", sentence
+        
             results.append({
-                "Timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "Timestamp": (base_time + datetime.timedelta(seconds=i * 10)).strftime('%Y-%m-%d %H:%M:%S'),
                 "Speaker": speaker,
                 "Message": content,
-                "Sentiment": sentiment["label"],
-                "Score": round(sentiment["score"], 2)
+                "Sentiment": sentiment,
+                "Score": round(confidence, 2)
             })
 
         # Convert the results into a DataFrame
