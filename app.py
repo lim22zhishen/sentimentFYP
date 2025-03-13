@@ -311,6 +311,8 @@ if st.button('Run Sentiment Analysis'):
         st.write("Performing Sentiment Analysis...")
         sentiment_results = analyze_sentiment_openai(conversation)
 
+        base_time = datetime.datetime.now()
+        
         # Create structured data
         results = []
         # Modify loop to assign timestamps based on message order
