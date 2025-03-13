@@ -7,9 +7,7 @@ import plotly.express as px
 import openai
 from openai import OpenAI
 import re
-import tempfile
 from pyannote.audio import Pipeline
-from pydub import AudioSegment
 import subprocess
 
 
@@ -259,18 +257,18 @@ def load_diarization_pipeline():
     return pipeline
     
 # Streamlit app
-st.title("Audio Transcription and Sentiment Analysis App")
+st.title("Sentiment Analysis App")
 
-# Input section for customer service conversation or audio file
+# Input section for text or audio file
 input_type = st.radio("Select Input Type", ("Text", "Audio"), index=1)  # 0 = "Text", 1 = "Audio"
 
 
 if input_type == "Text":
-    st.write("Enter a customer service conversation (each line is a new interaction between customer and service agent):")
-    conversation = st.text_area("Conversation", height=300, placeholder="Enter customer-service interaction here...")
+    st.write("Enter text:")
+    conversation = st.text_area("Conversation", height=300, placeholder="Enter text here...")
 elif input_type == "Audio":
-    st.write("Upload an audio file (WAV):")
-    uploaded_file = st.file_uploader("Upload Audio", type=["wav"])
+    st.write("Upload an audio file :")
+    uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "ogg", "m4a", "flac"])
 
 # Add a button to run the analysis
 if st.button('Run Sentiment Analysis'):
