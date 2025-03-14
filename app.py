@@ -342,13 +342,13 @@ if st.button('Run Sentiment Analysis'):
         # Create a sentiment map for converting labels to numerical values
         sentiment_map = {"positive": 1, "neutral": 0, "negative": -1}
         # Apply mapping in a case-insensitive way
-        df["SentimentValue"] = df["Sentiment"].str.lower().map(sentiment_map)
+        df["Sentiment"] = df["Sentiment"].str.lower().map(sentiment_map)
         
         # Plot sentiment over time using Plotly
         fig = px.line(
             df, 
             x='Timestamp',  # Using 'Timestamp' instead of index
-            y='SentimentValue',  # Using our mapped values
+            y='Sentiment',  # Using our mapped values
             color='Speaker',  # Color by speaker instead of sentiment
             title="Sentiment Changes Over Time", 
             markers=True
@@ -452,7 +452,7 @@ if st.button('Run Sentiment Analysis'):
             
             fig = px.line(df, x=df.index, y="SentimentValue", color="Speaker", 
                          title="Sentiment Changes Over Time",
-                         labels={"index": "Utterance Sequence", "SentimentValue": "Sentiment"},
+                         labels={"index": "Audio Duration", "SentimentValue": "Sentiment"},
                          category_orders={"SentimentValue": [-1, 0, 1]})
             
             # Add custom y-tick labels
