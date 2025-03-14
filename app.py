@@ -334,20 +334,35 @@ if st.button('Run Sentiment Analysis'):
         # Convert the results into a DataFrame
         df = pd.DataFrame(results)
         styled_df = df.style.apply(style_table, axis=1)
-
+        
         # Display the DataFrame
         st.write("Conversation with Sentiment Labels:")
         st.dataframe(styled_df)
-
+        
+        # Create a sentiment map for converting labels to numerical values
+        sentiment_map = {"positive": 1, "neutral": 0, "negative": -1}
+        # Apply mapping in a case-insensitive way
+        df["SentimentValue"] = df["Sentiment"].str.lower().map(sentiment_map)
+        
         # Plot sentiment over time using Plotly
         fig = px.line(
             df, 
-            x='Timestamp', 
-            y='Score', 
-            color='Sentiment', 
-            title="Sentiment Score Over Time", 
+            x='Timestamp',  # Using 'Timestamp' instead of index
+            y='SentimentValue',  # Using our mapped values
+            color='Speaker',  # Color by speaker instead of sentiment
+            title="Sentiment Changes Over Time", 
             markers=True
         )
+        
+        # Customize the y-axis to show sentiment labels
+        fig.update_layout(
+            yaxis=dict(
+                tickmode='array',
+                tickvals=[-1, 0, 1],
+                ticktext=['Negative', 'Neutral', 'Positive']
+            )
+        )
+        
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig)
         
@@ -432,7 +447,22 @@ if st.button('Run Sentiment Analysis'):
             st.dataframe(styled_df)
             
             # For your visualization:
-            fig = px.line(df, x=df.index, y="Score", color="Speaker", title="Sentiment Score Over Time")
+            sentiment_map = {"positive": 1, "neutral": 0, "negative": -1}
+            df["SentimentValue"] = df["Sentiment"].str.lower().map(sentiment_map)
+            
+            fig = px.line(df, x=df.index, y="SentimentValue", color="Speaker", 
+                         title="Sentiment Changes Over Time",
+                         labels={"index": "Utterance Sequence", "SentimentValue": "Sentiment"},
+                         category_orders={"SentimentValue": [-1, 0, 1]})
+            
+            # Add custom y-tick labels
+            fig.update_layout(
+                yaxis=dict(
+                    tickmode='array',
+                    tickvals=[-1, 0, 1],
+                    ticktext=['Negative', 'Neutral', 'Positive']
+                )
+            )
             st.plotly_chart(fig)
             
         except Exception as e:
