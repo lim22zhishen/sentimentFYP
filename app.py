@@ -363,8 +363,10 @@ if st.button('Run Sentiment Analysis'):
             audio_format = "audio/ogg"
         elif file_extension in ['.m4a']:
             audio_format = "audio/mp4"
+        elif file_extension in ['.opp']:
+            audio_format = "audio/opp" 
             
-        st.audio(temp_file_path, format="audio/wav")
+        st.audio(temp_file_path, format = audio_format)
         
         # Process audio with enhanced multilanguage capability
         st.write("Processing audio...")
