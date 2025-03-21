@@ -18,14 +18,43 @@ openai.api_key = OPENAI_API_KEY
 # Initialize the OpenAI client with the API key
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-
-# Use a smaller and lighter model (distilbert instead of XLM-Roberta)
-sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-
 def extract_text_within_quotes(text):
     """Extracts and returns only the content inside double quotation marks."""
     matches = re.findall(r'"(.*?)"', text)  # Find all text inside double quotes
     return " ".join(matches) if matches else text  # Join if multiple matches, else return original text
+
+def batch_analyze_sentiments_openai(messages):
+    """
+    Uses OpenAI API (GPT-4) to analyze sentiment for a full conversation.
+    GPT will analyze each sentence separately.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
+                Analyze each sentence separately and return a structured JSON output. \
+                Each sentence should have its sentiment label (POSITIVE, NEUTRAL, or NEGATIVE) and a confidence score (0 to 1)."},
+                {"role": "user", "content": json.dumps(messages)}
+            ]
+        )
+
+        # Extract response content
+        sentiment_results = response.choices[0].message.content.strip()
+
+        # Convert JSON output into a Python dictionary
+        results = json.loads(sentiment_results)
+        return results  # Returns a list of sentence-wise sentiment analysis
+
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON response: {e}")
+        print(f"Raw response: {sentiment_results}")
+        return []  # Return empty list on JSON parsing failure
+
+    except Exception as e:
+        print(f"Error in sentiment analysis: {e}")
+        return []  # Return empty list for any other errors
+
 
 def analyze_sentiment_openai(text):
     """
@@ -59,15 +88,6 @@ def analyze_sentiment_openai(text):
         print(f"Error in sentiment analysis: {e}")
         return []  # Return empty list for any other errors
 
-
-# Function to analyze sentiment in batches
-def batch_analyze_sentiments(messages):
-    results = sentiment_pipeline(messages)
-    sentiments = [
-        {"label": res["label"], "score": res["score"]}
-        for res in results
-    ]
-    return sentiments
 
 def diarize_audio(diarization_pipeline, audio_file):
     """
@@ -419,7 +439,7 @@ if st.button('Run Sentiment Analysis'):
             messages = [s["text"] for s in sentences_with_speakers]
 
             text_for_analysis = [s["translation"] if "translation" in s else s["text"] for s in sentences_with_speakers]
-            sentiments = analyze_sentiment_openai(text_for_analysis)
+            sentiments = batch_analyze_sentiments_openai(text_for_analysis)
             
             # When preparing the final results DataFrame
             results = []
