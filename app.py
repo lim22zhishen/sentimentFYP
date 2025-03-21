@@ -419,7 +419,7 @@ if st.button('Run Sentiment Analysis'):
             messages = [s["text"] for s in sentences_with_speakers]
 
             text_for_analysis = [s["translation"] if "translation" in s else s["text"] for s in sentences_with_speakers]
-            sentiments = batch_analyze_sentiments(text_for_analysis)
+            sentiments = analyze_sentiment_openai(text_for_analysis)
             
             # When preparing the final results DataFrame
             results = []
