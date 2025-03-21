@@ -55,7 +55,37 @@ def analyze_sentiment_openai(text):
         print(f"Error in sentiment analysis: {e}")
         return []  # Return empty list for any other errors
 
-
+def batch_analyze_sentiment_openai(text):
+    """
+    Uses OpenAI API (GPT-4) to analyze sentiment for the entire text as a whole.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
+                Analyze the entire text as a whole and provide a single sentiment label \
+                (POSITIVE, NEUTRAL, or NEGATIVE) along with a confidence score (0 to 1)."},
+                {"role": "user", "content": f"Text:\n{text}\n\nProvide output as a JSON object with 'sentiment' and 'confidence' fields."}
+            ]
+        )
+        
+        # Extract response content
+        sentiment_results = response.choices[0].message.content.strip()
+        
+        # Convert JSON output into a Python dictionary
+        result = json.loads(sentiment_results)
+        return result  # Returns a single sentiment result for the entire text
+        
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON response: {e}")
+        print(f"Raw response: {sentiment_results}")
+        return {}  # Return empty dictionary on JSON parsing failure
+        
+    except Exception as e:
+        print(f"Error in sentiment analysis: {e}")
+        return {}  # Return empty dictionary for any other errors
+        
 def diarize_audio(diarization_pipeline, audio_file):
     """
     Perform speaker diarization with improved speaker label handling.
@@ -400,13 +430,12 @@ if st.button('Run Sentiment Analysis'):
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
 
-
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
 
             text_for_analysis = [s["translation"] if "translation" in s else s["text"] for s in sentences_with_speakers]
-            sentiments = analyze_sentiment_openai(text_for_analysis)
+            sentiments = batch_analyze_sentiment_openai(text_for_analysis)
             
             # When preparing the final results DataFrame
             results = []
