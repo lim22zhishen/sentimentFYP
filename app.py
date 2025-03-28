@@ -443,6 +443,7 @@ if st.button('Run Sentiment Analysis'):
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
 
+            st.json(speaker_segments)
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
