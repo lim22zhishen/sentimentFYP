@@ -45,14 +45,9 @@ def analyze_sentiment_openai(text):
         
         results = json.loads(sentiment_results)
         return results  # Returns a list of sentence-wise sentiment analysis
-        
-    except json.JSONDecodeError as e:
-        print(f"Error parsing JSON response: {e}")
-        print(f"Raw response: {sentiment_results}")
-        return []  # Return empty list on JSON parsing failure
-        
+           
     except Exception as e:
-        print(f"Error in sentiment analysis: {e}")
+        st.write(f"Error in sentiment analysis: {e}")
         return []  # Return empty list for any other errors
 
 
@@ -89,12 +84,10 @@ def batch_analyze_sentiment_openai(messages):
             })
         
         except json.JSONDecodeError as e:
-            print(f"Error parsing JSON response: {e}")
-            print(f"Raw response: {sentiment_results}")
             results.append({"text": message, "sentiment": "Error", "confidence": 0})
         
         except Exception as e:
-            print(f"Error in sentiment analysis: {e}")
+            st.write(f"Error in sentiment analysis: {e}")
             results.append({"text": message, "sentiment": "Error", "confidence": 0})
     
     return results  # Returns a list of sentiment results, one per message
