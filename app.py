@@ -364,6 +364,9 @@ if st.button('Run Sentiment Analysis'):
 
         # Convert the results into a DataFrame
         df = pd.DataFrame(results)
+
+        df["Score"] = df["Score"].apply(lambda x: f"{x:.2f}")
+        
         styled_df = df.style.apply(style_table, axis=1)
         
         # Display the DataFrame
@@ -472,6 +475,11 @@ if st.button('Run Sentiment Analysis'):
             st.write(f"Unique speakers in final results: {', '.join(unique_result_speakers)}")
             
             df = pd.DataFrame(results)
+
+            df["Score"] = df["Score"].apply(lambda x: f"{x:.2f}")
+            df["Start Time"] = df["Start Time"].apply(lambda x: f"{x:.2f}")
+            df["End Time"] = df["End Time"].apply(lambda x: f"{x:.2f}")
+            
             styled_df = df.style.apply(style_table, axis=1)
             st.write("Final Analysis:")
             st.dataframe(styled_df)
