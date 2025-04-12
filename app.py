@@ -69,7 +69,7 @@ def batch_analyze_sentiment_openai(text_list):
             results.append(result)
         except json.JSONDecodeError as e:
             st.write(f"JSON parsing error: {e}")
-            st.write(f"Raw response: repr{sentiment_results}")
+            st.write(f"Raw response: {repr(sentiment_results)}}")
             results.append({"sentiment": "neutral", "confidence": 0.0})
         except Exception as e:
             st.write(f"Error in sentiment analysis: {e}")
