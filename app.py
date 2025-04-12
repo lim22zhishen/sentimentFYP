@@ -30,7 +30,8 @@ def analyze_sentiment_openai(text):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4-turbo",
+            response_format="json",  # This enforces strict JSON output
             messages=[
                 {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
                 Analyze each sentence separately and return a structured JSON output. \
@@ -421,10 +422,6 @@ if st.button('Run Sentiment Analysis'):
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
-
-            st.write("Sample from sentences_with_speakers:")
-            for i, s in enumerate(sentences_with_speakers[:5]):
-                st.write(f"Index {i}: {s} (type: {type(s)})")
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
