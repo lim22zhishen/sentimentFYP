@@ -50,38 +50,31 @@ def analyze_sentiment_openai(text):
         st.write(f"Error in sentiment analysis: {e}")
         return []  # Return empty list for any other errors
 
+def batch_analyze_sentiment_openai(text_list):
+    results = []
+    for text in text_list:
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
+                    Analyze the entire text as a whole and provide a single sentiment label \
+                    (POSITIVE, NEUTRAL, or NEGATIVE) along with a confidence score (0 to 1)."},
+                    {"role": "user", "content": f"Text:\n{text}\n\nProvide output as a JSON object with 'sentiment' and 'confidence' fields."}
+                ]
+            )
+            sentiment_results = response.choices[0].message.content.strip()
+            result = json.loads(sentiment_results)
+            results.append(result)
+        except json.JSONDecodeError as e:
+            st.write(f"JSON parsing error: {e}")
+            st.write(f"Raw response: {sentiment_results}")
+            results.append({"sentiment": "neutral", "confidence": 0.0})
+        except Exception as e:
+            st.write(f"Error in sentiment analysis: {e}")
+            results.append({"sentiment": "neutral", "confidence": 0.0})
+    return results
 
-def batch_analyze_sentiment_openai(text):
-    """
-    Uses OpenAI API (GPT-4) to analyze sentiment for the entire text as a whole.
-    """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
-                Analyze the entire text as a whole and provide a single sentiment label \
-                (POSITIVE, NEUTRAL, or NEGATIVE) along with a confidence score (0 to 1)."},
-                {"role": "user", "content": f"Text:\n{text}\n\nProvide output as a JSON object with 'sentiment' and 'confidence' fields."}
-            ]
-        )
-        
-        # Extract response content
-        sentiment_results = response.choices[0].message.content.strip()
-        
-        # Convert JSON output into a Python dictionary
-        result = json.loads(sentiment_results)
-        return result  # Returns a single sentiment result for the entire text
-        
-    except json.JSONDecodeError as e:
-        st.write(f"Error parsing JSON response: {e}")
-        st.write(f"Raw response: {sentiment_results}")
-        return {}  # Return empty dictionary on JSON parsing failure
-        
-    except Exception as e:
-        st.write(f"Error in sentiment analysis: {e}")
-        return {}  # Return empty dictionary for any other errors
-        
 def diarize_audio(diarization_pipeline, audio_file):
     """
     Perform speaker diarization with improved speaker label handling.
