@@ -427,11 +427,13 @@ if st.button('Run Sentiment Analysis'):
             st.write("Performing Sentiment Analysis...")
             messages = [s["text"] for s in sentences_with_speakers]
 
-            text_for_analysis = [s["translation"] if "translation" in s else s["text"] for s in sentences_with_speakers]
+            text_for_analysis = [
+                s["translation"] if isinstance(s, dict) and "translation" in s
+                else s["text"] if isinstance(s, dict) and "text" in s
+                else s
+                for s in sentences_with_speakers
+            ]
 
-            st.write("Sample from sentences_with_speakers:")
-            for i, s in enumerate(text_for_analysis[:5]):
-                st.write(f"Index {i}: {s} (type: {type(s)})")
 
             sentiments = batch_analyze_sentiment_openai(text_for_analysis)
             
