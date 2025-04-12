@@ -68,12 +68,10 @@ def batch_analyze_sentiment_openai(text_list):
             result = json.loads(sentiment_results)
             results.append(result)
         except json.JSONDecodeError as e:
-            st.write(f"JSON parsing error: {e}")
-            st.write(f"Raw response: {repr(sentiment_results)}")
-            results.append({"sentiment": "neutral", "confidence": 0.0})
+            results.append({"sentiment": "Neutral", "confidence": 0.0})
         except Exception as e:
             st.write(f"Error in sentiment analysis: {e}")
-            results.append({"sentiment": "neutral", "confidence": 0.0})
+            results.append({"sentiment": "Neutral", "confidence": 0.0})
     return results
 
 def diarize_audio(diarization_pipeline, audio_file):
