@@ -418,10 +418,13 @@ if st.button('Run Sentiment Analysis'):
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
 
-            st.json(speaker_segments)
             # Align sentences with speakers
             st.write("Aligning transcription with speaker labels...")
             sentences_with_speakers = assign_speakers_to_sentences(audio_results, speaker_segments)
+
+            st.write("Sample from sentences_with_speakers:")
+            for i, s in enumerate(sentences_with_speakers[:5]):
+                st.write(f"Index {i}: {s} (type: {type(s)})")
 
             # Sentiment Analysis
             st.write("Performing Sentiment Analysis...")
