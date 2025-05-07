@@ -26,30 +26,35 @@ def extract_text_within_quotes(text):
 def analyze_sentiment_openai(text):
     """
     Uses OpenAI API (GPT-4) to analyze sentiment for a full conversation.
-    GPT will split and analyze sentences individually.
+    GPT will split and analyze sentences individually and return a JSON-formatted string.
     """
     try:
         response = client.chat.completions.create(
             model="gpt-4-turbo",
-            response_format="json",  # This enforces strict JSON output
             messages=[
                 {"role": "system", "content": "You are an AI assistant performing sentiment analysis. \
-                Analyze each sentence separately and return a structured JSON output. \
-                Each sentence should have its sentiment label (POSITIVE, NEUTRAL, or NEGATIVE) and a confidence score (0 to 1)."},
-                {"role": "user", "content": f"Text:\n{text}\n\nProvide output as a JSON array with 'sentence', 'sentiment', and 'confidence' fields."}
+Analyze each sentence separately and return a valid JSON array. \
+Each item must have 'sentence', 'sentiment' (POSITIVE, NEUTRAL, NEGATIVE), and 'confidence' (0.0 to 1.0)."},
+                {"role": "user", "content": f"Text:\n{text}\n\nOutput only the JSON array, with no explanation or extra text."}
             ]
         )
-        # Extract response content
+
         sentiment_results = response.choices[0].message.content.strip()
-        
-        # Convert JSON output into a Python dictionary
-        
-        results = json.loads(sentiment_results)
-        return results  # Returns a list of sentence-wise sentiment analysis
-           
+
+        # Try to parse the JSON
+        try:
+            results = json.loads(sentiment_results)
+        except json.JSONDecodeError:
+            st.error("Failed to parse JSON response. Here's the raw output:")
+            st.code(sentiment_results)
+            return []
+
+        return results
+
     except Exception as e:
-        st.write(f"Error in sentiment analysis: {e}")
-        return []  # Return empty list for any other errors
+        st.error(f"Error in sentiment analysis: {e}")
+        return []
+
 
 def batch_analyze_sentiment_openai(text_list):
     results = []
