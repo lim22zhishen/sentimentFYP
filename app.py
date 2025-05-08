@@ -465,6 +465,8 @@ if st.button('Run Sentiment Analysis'):
             df["Score"] = df["Score"].apply(lambda x: f"{x:.2f}")
             df["Start Time"] = df["Start Time"].apply(lambda x: f"{x:.2f}")
             df["End Time"] = df["End Time"].apply(lambda x: f"{x:.2f}")
+            df["Mid Time"] = df[["Start Time", "End Time"]].astype(float).mean(axis=1)
+
             
             styled_df = df.style.apply(style_table, axis=1)
             st.write("Final Analysis:")
@@ -474,10 +476,16 @@ if st.button('Run Sentiment Analysis'):
             sentiment_map = {"positive": 1, "neutral": 0, "negative": -1}
             df["SentimentValue"] = df["Sentiment"].str.lower().map(sentiment_map)
             
-            fig = px.line(df, x=df.index, y="SentimentValue", color="Speaker", 
-                         title="Sentiment Changes Over Time",
-                         labels={"index": "Audio Duration", "SentimentValue": "Sentiment"},
-                         category_orders={"SentimentValue": [-1, 0, 1]})
+            fig = px.line(
+                df,
+                x="Mid Time",
+                y="SentimentValue",
+                color="Speaker",
+                title="Sentiment Changes Over Time",
+                labels={"Mid Time": "Time (s)", "SentimentValue": "Sentiment"},
+                category_orders={"SentimentValue": [-1, 0, 1]}
+            )
+
             
             # Add custom y-tick labels
             fig.update_layout(
