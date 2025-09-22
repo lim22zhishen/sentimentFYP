@@ -11,6 +11,7 @@ from pyannote.audio import Pipeline
 import subprocess
 import json
 
+
 HUGGINGFACE_TOKEN = st.secrets['token']
 OPENAI_API_KEY = st.secrets["keys"]
 openai.api_key = OPENAI_API_KEY
@@ -495,6 +496,7 @@ if st.button('Run Sentiment Analysis'):
                     ticktext=['Negative', 'Neutral', 'Positive']
                 )
             )
+
             st.plotly_chart(fig)
             
         except Exception as e:
