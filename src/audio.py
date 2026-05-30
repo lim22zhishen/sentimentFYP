@@ -8,13 +8,11 @@ to an external API.
 import os
 import shutil
 import subprocess
+import tempfile
 
 import numpy as np
 import soundfile as sf
 import streamlit as st
-import torch
-
-from src.models import load_asr_model, load_diarization_pipeline
 
 TARGET_SAMPLE_RATE = 16000
 
@@ -37,27 +35,41 @@ def _ffmpeg_exe():
 
 
 def process_audio_file(uploaded_file):
-    """Save an uploaded file and convert it to 16 kHz mono WAV for processing."""
-    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
-    temp_file_path = f"temp_audio{file_extension}"
+    """Save an uploaded file and convert it to 16 kHz mono WAV for processing.
 
-    with open(temp_file_path, "wb") as f:
+    Uses unique temp paths (``tempfile``) so two overlapping runs can't clobber
+    each other's ``temp_audio.wav``. Returns the path to a WAV the caller is
+    responsible for deleting.
+    """
+    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+
+    fd, src_path = tempfile.mkstemp(suffix=file_extension or ".bin", prefix="sent_audio_")
+    with os.fdopen(fd, "wb") as f:
         f.write(uploaded_file.read())
 
-    if file_extension != ".wav":
-        try:
-            wav_path = "temp_audio.wav"
-            subprocess.run(
-                [_ffmpeg_exe(), "-y", "-i", temp_file_path,
-                 "-ar", str(TARGET_SAMPLE_RATE), "-ac", "1", wav_path],
-                check=True, capture_output=True,
-            )
-            os.remove(temp_file_path)
-            temp_file_path = wav_path
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Failed to convert audio: {e.stderr.decode(errors='ignore')}")
+    if file_extension == ".wav":
+        return src_path
 
-    return temp_file_path
+    wav_fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="sent_audio_")
+    os.close(wav_fd)
+    try:
+        subprocess.run(
+            [_ffmpeg_exe(), "-y", "-i", src_path,
+             "-ar", str(TARGET_SAMPLE_RATE), "-ac", "1", wav_path],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        for path in (src_path, wav_path):
+            if os.path.exists(path):
+                os.remove(path)
+        raise RuntimeError(
+            f"Failed to convert audio: {e.stderr.decode(errors='ignore')}"
+        ) from e
+    finally:
+        if os.path.exists(src_path):
+            os.remove(src_path)
+
+    return wav_path
 
 
 def _load_waveform(wav_path):
@@ -71,6 +83,8 @@ def _load_waveform(wav_path):
 def transcribe_audio(wav_path):
     """Transcribe audio locally with faster-whisper, returning text, detected
     language, per-segment timestamps, and an English translation when needed."""
+    from src.models import load_asr_model  # lazy: keeps module import cheap
+
     model = load_asr_model()
 
     segments, info = model.transcribe(wav_path, beam_size=5)
@@ -110,45 +124,51 @@ def diarize_audio(diarization_pipeline, wav_path):
 
     The audio is loaded in-memory and passed as a waveform dict, which avoids
     pyannote 4.x's file-decoding path (torchcodec), unreliable on Windows.
+
+    On failure this raises ``RuntimeError`` rather than returning a fabricated
+    single-speaker segment — a bad diarization should surface as an error, not
+    masquerade as a valid result.
     """
+    import torch  # lazy: only needed when diarization actually runs
+
+    audio, sr = _load_waveform(wav_path)
+    waveform = torch.from_numpy(audio).unsqueeze(0)  # (channel, time)
+
     try:
-        st.write("Starting diarization...")
-        audio, sr = _load_waveform(wav_path)
-        waveform = torch.from_numpy(audio).unsqueeze(0)  # (channel, time)
         diarization_result = diarization_pipeline({"waveform": waveform, "sample_rate": sr})
-
-        # pyannote 4.x returns a DiarizeOutput wrapper; 3.x returns the
-        # Annotation directly. Unwrap to the Annotation either way.
-        annotation = getattr(diarization_result, "speaker_diarization", diarization_result)
-
-        speaker_segments = []
-        unique_speakers = set()
-        for segment, _, speaker in annotation.itertracks(yield_label=True):
-            unique_speakers.add(speaker)
-            speaker_segments.append({
-                "start": round(segment.start, 2),
-                "end": round(segment.end, 2),
-                "speaker": speaker,
-            })
-
-        st.success(
-            f"Diarization complete. Found {len(unique_speakers)} unique speakers "
-            f"and {len(speaker_segments)} speech segments."
-        )
-
-        speaker_map = {s: f"Speaker {i+1}" for i, s in enumerate(sorted(unique_speakers))}
-        mapped_segments = []
-        for segment in speaker_segments:
-            mapped = segment.copy()
-            mapped["original_speaker"] = segment["speaker"]
-            mapped["speaker"] = speaker_map.get(segment["speaker"], segment["speaker"])
-            mapped_segments.append(mapped)
-
-        return mapped_segments
-
     except Exception as e:
-        st.error(f"Speaker diarization failed: {str(e)}")
-        return [{"start": 0.0, "end": 1000.0, "speaker": "Speaker 1"}]
+        raise RuntimeError(f"Speaker diarization failed: {e}") from e
+
+    # pyannote 4.x returns a DiarizeOutput wrapper; 3.x returns the Annotation
+    # directly. Unwrap to the Annotation either way.
+    annotation = getattr(diarization_result, "speaker_diarization", diarization_result)
+
+    speaker_segments = []
+    unique_speakers = set()
+    for segment, _, speaker in annotation.itertracks(yield_label=True):
+        unique_speakers.add(speaker)
+        speaker_segments.append({
+            "start": round(segment.start, 2),
+            "end": round(segment.end, 2),
+            "speaker": speaker,
+        })
+
+    if not speaker_segments:
+        raise RuntimeError("Speaker diarization produced no speech segments.")
+
+    st.write(
+        f"Found {len(unique_speakers)} speaker(s) across {len(speaker_segments)} segments."
+    )
+
+    speaker_map = {s: f"Speaker {i+1}" for i, s in enumerate(sorted(unique_speakers))}
+    mapped_segments = []
+    for segment in speaker_segments:
+        mapped = segment.copy()
+        mapped["original_speaker"] = segment["speaker"]
+        mapped["speaker"] = speaker_map.get(segment["speaker"], segment["speaker"])
+        mapped_segments.append(mapped)
+
+    return mapped_segments
 
 
 def assign_speakers_to_sentences(audio_results, speaker_segments):

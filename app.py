@@ -16,7 +16,8 @@ from src.models import load_diarization_pipeline
 from src.ui_helpers import (
     render_sentiment_table,
     render_sentiment_chart,
-    download_results_button,
+    render_speaker_summary,
+    render_export_buttons,
 )
 
 AUDIO_MIME = {
@@ -53,15 +54,20 @@ def run_text_analysis(conversation):
 def run_audio_analysis(uploaded_file):
     """Transcribe, diarize and analyze an uploaded audio file.
 
-    Heavy work runs inside a single ``st.status`` block; the result dict is
-    returned so the caller can persist and re-render it without recomputing.
+    Heavy work runs inside a single ``st.status`` block; failures surface as an
+    error (and return ``None``) rather than producing fabricated results. The
+    result dict is returned so the caller can persist and re-render it without
+    recomputing.
     """
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
     audio_bytes = uploaded_file.getvalue()
-    temp_file_path = process_audio_file(uploaded_file)
+    temp_file_path = None
 
     try:
         with st.status("Analyzing audio…", expanded=True) as status:
+            st.write("Preparing audio…")
+            temp_file_path = process_audio_file(uploaded_file)
+
             st.write("Transcribing speech…")
             audio_results = transcribe_audio(temp_file_path)
 
@@ -82,33 +88,36 @@ def run_audio_analysis(uploaded_file):
             messages = [s["text"] for s in sentences_with_speakers]
             sentiments = analyze_sentiment(messages)
             status.update(label="Analysis complete", state="complete", expanded=False)
-
-        rows = []
-        for i, sentiment in enumerate(sentiments):
-            rows.append({
-                "Speaker": sentences_with_speakers[i]["speaker"],
-                "Text": messages[i],
-                "Sentiment": sentiment["sentiment"],
-                "Score": round(sentiment["confidence"], 2),
-                "Start Time": sentences_with_speakers[i]["start"],
-                "End Time": sentences_with_speakers[i]["end"],
-            })
-
-        df = pd.DataFrame(rows)
-        df["Mid Time"] = df[["Start Time", "End Time"]].astype(float).mean(axis=1)
-
-        return {
-            "mode": "audio",
-            "df": df,
-            "language": audio_results["primary_language"],
-            "transcription": audio_results["transcription"],
-            "translation": audio_results["translation"],
-            "audio_bytes": audio_bytes,
-            "audio_format": AUDIO_MIME.get(file_extension, "audio/wav"),
-        }
+    except Exception as e:
+        st.error(f"Audio processing failed: {e}")
+        return None
     finally:
-        if os.path.exists(temp_file_path):
+        if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+    rows = []
+    for i, sentiment in enumerate(sentiments):
+        rows.append({
+            "Speaker": sentences_with_speakers[i]["speaker"],
+            "Text": messages[i],
+            "Sentiment": sentiment["sentiment"],
+            "Score": round(sentiment["confidence"], 2),
+            "Start Time": sentences_with_speakers[i]["start"],
+            "End Time": sentences_with_speakers[i]["end"],
+        })
+
+    df = pd.DataFrame(rows)
+    df["Mid Time"] = df[["Start Time", "End Time"]].astype(float).mean(axis=1)
+
+    return {
+        "mode": "audio",
+        "df": df,
+        "language": audio_results["primary_language"],
+        "transcription": audio_results["transcription"],
+        "translation": audio_results["translation"],
+        "audio_bytes": audio_bytes,
+        "audio_format": AUDIO_MIME.get(file_extension, "audio/wav"),
+    }
 
 
 def render_results(data):
@@ -126,18 +135,17 @@ def render_results(data):
             st.write("### English Translation:")
             st.text_area("Translation", data["translation"], height=200)
 
-        speakers = ", ".join(sorted(set(df["Speaker"])))
-        st.write(f"Unique speakers in final results: {speakers}")
-
-        st.write("Final Analysis:")
+        st.write("### Final Analysis")
         render_sentiment_table(df)
+        render_speaker_summary(df)
         render_sentiment_chart(df, x_col="Mid Time", x_title="Time (s)")
     else:
-        st.write("Conversation with Sentiment Labels:")
+        st.write("### Conversation with Sentiment Labels")
         render_sentiment_table(df)
+        render_speaker_summary(df)
         render_sentiment_chart(df, x_col="Timestamp", x_title="Timestamp")
 
-    download_results_button(df)
+    render_export_buttons(data)
 
 
 # Streamlit app
@@ -168,3 +176,5 @@ if st.button("Run Sentiment Analysis"):
 
 if st.session_state.get("results"):
     render_results(st.session_state["results"])
+elif "results" in st.session_state:
+    st.info("Analysis finished but produced no results — check the messages above.")

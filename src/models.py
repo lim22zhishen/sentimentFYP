@@ -3,15 +3,15 @@
 Each loader is wrapped in ``st.cache_resource`` so the model is downloaded and
 moved to the device only once per session. Models download from the HuggingFace
 Hub on first use and are then cached on disk (``~/.cache/huggingface``).
+
+The heavy third-party imports (faster-whisper, transformers, pyannote, torch)
+are deferred into the loader bodies so that importing this module — and the
+modules that depend on it — stays cheap and test-friendly.
 """
 
 import inspect
 
 import streamlit as st
-import torch
-from faster_whisper import WhisperModel
-from transformers import pipeline as hf_pipeline
-from pyannote.audio import Pipeline as DiarizationPipeline
 
 from src.config import ASR_COMPUTE_TYPE, DEVICE, HF_DEVICE, HUGGINGFACE_TOKEN
 
@@ -25,11 +25,15 @@ DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 
 @st.cache_resource(show_spinner="Loading speech-to-text model…")
 def load_asr_model():
+    from faster_whisper import WhisperModel
+
     return WhisperModel(ASR_MODEL, device=DEVICE, compute_type=ASR_COMPUTE_TYPE)
 
 
 @st.cache_resource(show_spinner="Loading sentiment model…")
 def load_sentiment_pipeline():
+    from transformers import pipeline as hf_pipeline
+
     return hf_pipeline(
         "sentiment-analysis",
         model=SENTIMENT_MODEL,
@@ -39,6 +43,9 @@ def load_sentiment_pipeline():
 
 @st.cache_resource(show_spinner="Loading speaker-diarization model…")
 def load_diarization_pipeline():
+    import torch
+    from pyannote.audio import Pipeline as DiarizationPipeline
+
     if not HUGGINGFACE_TOKEN:
         st.error(
             "A HuggingFace token is required for speaker diarization. Add "
