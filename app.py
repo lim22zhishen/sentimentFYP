@@ -35,17 +35,17 @@ def run_text_analysis(conversation):
         st.warning("No text to analyze.")
         return None
 
-    sentiments = analyze_sentiment([t["message"] for t in turns])
+    sentiments = analyze_sentiment([t.message for t in turns])
     base_time = datetime.datetime.now()
 
     rows = []
     for i, (turn, sentiment) in enumerate(zip(turns, sentiments)):
         rows.append({
             "Timestamp": (base_time + datetime.timedelta(seconds=i * 10)).strftime('%Y-%m-%d %H:%M:%S'),
-            "Speaker": turn["speaker"],
-            "Message": turn["message"],
-            "Sentiment": sentiment["sentiment"],
-            "Score": round(sentiment["confidence"], 2),
+            "Speaker": turn.speaker,
+            "Message": turn.message,
+            "Sentiment": sentiment.sentiment,
+            "Score": round(sentiment.confidence, 2),
         })
 
     return {"mode": "text", "df": pd.DataFrame(rows)}
@@ -69,24 +69,23 @@ def run_audio_analysis(uploaded_file):
             temp_file_path = process_audio_file(uploaded_file)
 
             st.write("Transcribing speech…")
-            audio_results = transcribe_audio(temp_file_path)
+            transcription = transcribe_audio(temp_file_path)
 
             st.write("Identifying speakers…")
             diarization_pipeline = load_diarization_pipeline()
             speaker_segments = diarize_audio(diarization_pipeline, temp_file_path)
+            n_speakers = len({s.speaker for s in speaker_segments})
+            st.write(f"Found {n_speakers} speaker(s) across {len(speaker_segments)} segments.")
 
             st.write("Aligning transcription with speakers…")
-            sentences_with_speakers = assign_speakers_to_sentences(
-                audio_results, speaker_segments
-            )
+            aligned = assign_speakers_to_sentences(transcription, speaker_segments)
 
-            if not sentences_with_speakers:
+            if not aligned:
                 status.update(label="No transcribed segments to analyze.", state="error")
                 return None
 
             st.write("Scoring sentiment…")
-            messages = [s["text"] for s in sentences_with_speakers]
-            sentiments = analyze_sentiment(messages)
+            sentiments = analyze_sentiment([s.text for s in aligned])
             status.update(label="Analysis complete", state="complete", expanded=False)
     except Exception as e:
         st.error(f"Audio processing failed: {e}")
@@ -96,14 +95,14 @@ def run_audio_analysis(uploaded_file):
             os.remove(temp_file_path)
 
     rows = []
-    for i, sentiment in enumerate(sentiments):
+    for sentence, sentiment in zip(aligned, sentiments):
         rows.append({
-            "Speaker": sentences_with_speakers[i]["speaker"],
-            "Text": messages[i],
-            "Sentiment": sentiment["sentiment"],
-            "Score": round(sentiment["confidence"], 2),
-            "Start Time": sentences_with_speakers[i]["start"],
-            "End Time": sentences_with_speakers[i]["end"],
+            "Speaker": sentence.speaker,
+            "Text": sentence.text,
+            "Sentiment": sentiment.sentiment,
+            "Score": round(sentiment.confidence, 2),
+            "Start Time": sentence.start,
+            "End Time": sentence.end,
         })
 
     df = pd.DataFrame(rows)
@@ -112,9 +111,9 @@ def run_audio_analysis(uploaded_file):
     return {
         "mode": "audio",
         "df": df,
-        "language": audio_results["primary_language"],
-        "transcription": audio_results["transcription"],
-        "translation": audio_results["translation"],
+        "language": transcription.language,
+        "transcription": transcription.transcription,
+        "translation": transcription.translation,
         "audio_bytes": audio_bytes,
         "audio_format": AUDIO_MIME.get(file_extension, "audio/wav"),
     }
@@ -168,7 +167,8 @@ elif input_type == "Audio":
 # so widget interactions don't re-run the (expensive) pipeline.
 if st.button("Run Sentiment Analysis"):
     if input_type == "Text" and conversation:
-        st.session_state["results"] = run_text_analysis(conversation)
+        with st.spinner("Analyzing text…"):
+            st.session_state["results"] = run_text_analysis(conversation)
     elif input_type == "Audio" and uploaded_file:
         st.session_state["results"] = run_audio_analysis(uploaded_file)
     else:

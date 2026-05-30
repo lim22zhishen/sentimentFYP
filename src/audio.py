@@ -1,10 +1,12 @@
 """Audio processing: transcription, translation, diarization, alignment.
 
-All inference is local: faster-whisper for transcription, language detection
-and English translation, and pyannote for speaker diarization. Nothing is sent
-to an external API.
+Pure core logic — returns dataclasses and raises on error, no Streamlit. All
+inference is local: faster-whisper for transcription, language detection and
+English translation, and pyannote for speaker diarization. Nothing is sent to an
+external API.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -12,7 +14,15 @@ import tempfile
 
 import numpy as np
 import soundfile as sf
-import streamlit as st
+
+from src.schemas import (
+    AlignedSentence,
+    SpeakerSegment,
+    TranscriptionResult,
+    TranscriptSegment,
+)
+
+logger = logging.getLogger(__name__)
 
 TARGET_SAMPLE_RATE = 16000
 
@@ -81,23 +91,24 @@ def _load_waveform(wav_path):
 
 
 def transcribe_audio(wav_path):
-    """Transcribe audio locally with faster-whisper, returning text, detected
-    language, per-segment timestamps, and an English translation when needed."""
+    """Transcribe audio locally with faster-whisper.
+
+    Returns a :class:`TranscriptionResult` with the text, detected language,
+    per-segment timestamps, and an English translation when needed.
+    """
     from src.models import load_asr_model  # lazy: keeps module import cheap
 
     model = load_asr_model()
 
     segments, info = model.transcribe(wav_path, beam_size=5)
-    sentence_timestamps = []
+    transcript_segments = []
     parts = []
     for seg in segments:  # generator — consume once
         text = seg.text.strip()
         parts.append(text)
-        sentence_timestamps.append({
-            "text": text,
-            "start": float(seg.start),
-            "end": float(seg.end),
-        })
+        transcript_segments.append(
+            TranscriptSegment(text=text, start=float(seg.start), end=float(seg.end))
+        )
 
     transcription = " ".join(parts).strip()
     primary_language = info.language or "unknown"
@@ -109,25 +120,25 @@ def transcribe_audio(wav_path):
             tr_segments, _ = model.transcribe(wav_path, task="translate", beam_size=5)
             translation = " ".join(s.text.strip() for s in tr_segments).strip()
         except Exception as e:
-            st.warning(f"Translation failed: {e}")
+            logger.warning("Translation failed: %s", e)
 
-    return {
-        "transcription": transcription,
-        "primary_language": primary_language,
-        "translation": translation,
-        "sentence_timestamps": sentence_timestamps,
-    }
+    return TranscriptionResult(
+        transcription=transcription,
+        language=primary_language,
+        translation=translation,
+        segments=transcript_segments,
+    )
 
 
 def diarize_audio(diarization_pipeline, wav_path):
-    """Run speaker diarization and return segments mapped to friendly names.
+    """Run speaker diarization and return a list of :class:`SpeakerSegment`.
 
     The audio is loaded in-memory and passed as a waveform dict, which avoids
     pyannote 4.x's file-decoding path (torchcodec), unreliable on Windows.
 
-    On failure this raises ``RuntimeError`` rather than returning a fabricated
-    single-speaker segment — a bad diarization should surface as an error, not
-    masquerade as a valid result.
+    Raises ``RuntimeError`` on failure or an empty result rather than returning a
+    fabricated single-speaker segment — a bad diarization should surface as an
+    error, not masquerade as a valid result.
     """
     import torch  # lazy: only needed when diarization actually runs
 
@@ -143,62 +154,52 @@ def diarize_audio(diarization_pipeline, wav_path):
     # directly. Unwrap to the Annotation either way.
     annotation = getattr(diarization_result, "speaker_diarization", diarization_result)
 
-    speaker_segments = []
+    raw_segments = []
     unique_speakers = set()
     for segment, _, speaker in annotation.itertracks(yield_label=True):
         unique_speakers.add(speaker)
-        speaker_segments.append({
-            "start": round(segment.start, 2),
-            "end": round(segment.end, 2),
-            "speaker": speaker,
-        })
+        raw_segments.append((round(segment.start, 2), round(segment.end, 2), speaker))
 
-    if not speaker_segments:
+    if not raw_segments:
         raise RuntimeError("Speaker diarization produced no speech segments.")
 
-    st.write(
-        f"Found {len(unique_speakers)} speaker(s) across {len(speaker_segments)} segments."
-    )
-
     speaker_map = {s: f"Speaker {i+1}" for i, s in enumerate(sorted(unique_speakers))}
-    mapped_segments = []
-    for segment in speaker_segments:
-        mapped = segment.copy()
-        mapped["original_speaker"] = segment["speaker"]
-        mapped["speaker"] = speaker_map.get(segment["speaker"], segment["speaker"])
-        mapped_segments.append(mapped)
+    return [
+        SpeakerSegment(
+            start=start,
+            end=end,
+            speaker=speaker_map.get(spk, spk),
+            original_speaker=spk,
+        )
+        for start, end, spk in raw_segments
+    ]
 
-    return mapped_segments
 
+def assign_speakers_to_sentences(transcription, speaker_segments):
+    """Assign each transcript segment to the speaker with the largest overlap.
 
-def assign_speakers_to_sentences(audio_results, speaker_segments):
-    """Assign each transcribed sentence to the speaker with the largest overlap."""
-    sentence_timestamps = audio_results.get("sentence_timestamps", [])
-    result = []
-
-    if not sentence_timestamps or not speaker_segments:
+    Returns a list of :class:`AlignedSentence`.
+    """
+    segments = transcription.segments
+    if not segments or not speaker_segments:
         return []
 
-    for sentence_info in sentence_timestamps:
-        sentence_start = sentence_info["start"]
-        sentence_end = sentence_info["end"]
+    result = []
+    for seg in segments:
         assigned_speaker = "Unknown Speaker"
         best_overlap = 0
 
-        for speaker_segment in speaker_segments:
-            speaker_start = speaker_segment["start"]
-            speaker_end = speaker_segment["end"]
-            if sentence_start <= speaker_end and sentence_end >= speaker_start:
-                overlap = min(sentence_end, speaker_end) - max(sentence_start, speaker_start)
+        for sp in speaker_segments:
+            if seg.start <= sp.end and seg.end >= sp.start:
+                overlap = min(seg.end, sp.end) - max(seg.start, sp.start)
                 if overlap > best_overlap:
                     best_overlap = overlap
-                    assigned_speaker = speaker_segment["speaker"]
+                    assigned_speaker = sp.speaker
 
-        result.append({
-            "text": sentence_info["text"],
-            "start": sentence_start,
-            "end": sentence_end,
-            "speaker": assigned_speaker,
-        })
+        result.append(
+            AlignedSentence(
+                text=seg.text, start=seg.start, end=seg.end, speaker=assigned_speaker
+            )
+        )
 
     return result

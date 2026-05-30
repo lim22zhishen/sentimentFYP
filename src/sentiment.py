@@ -1,6 +1,10 @@
-"""Local (transformers) sentiment analysis."""
+"""Local (transformers) sentiment analysis.
+
+Pure core logic: returns dataclasses and raises on error — no Streamlit.
+"""
 
 from src.models import load_sentiment_pipeline
+from src.schemas import SentimentResult, Turn
 
 # Normalise model label variants to the app's POSITIVE / NEUTRAL / NEGATIVE.
 _LABEL_MAP = {
@@ -20,7 +24,7 @@ def _normalize_label(label):
 def analyze_sentiment(texts):
     """Classify each string in ``texts``.
 
-    Returns a list of ``{"sentiment", "confidence"}`` dicts, one per input.
+    Returns a list of :class:`SentimentResult`, one per input.
     """
     items = [t if isinstance(t, str) else "" for t in texts]
     if not items:
@@ -34,16 +38,16 @@ def analyze_sentiment(texts):
         results = [results]
 
     return [
-        {
-            "sentiment": _normalize_label(r["label"]),
-            "confidence": round(float(r["score"]), 2),
-        }
+        SentimentResult(
+            sentiment=_normalize_label(r["label"]),
+            confidence=round(float(r["score"]), 2),
+        )
         for r in results
     ]
 
 
 def split_conversation(text):
-    """Split free-form conversation text into per-line turns.
+    """Split free-form conversation text into per-line :class:`Turn` objects.
 
     Lines shaped like ``Speaker: message`` are split into speaker + message;
     other lines are attributed to "Unknown".
@@ -57,5 +61,5 @@ def split_conversation(text):
             speaker, message = line.split(": ", 1)
         else:
             speaker, message = "Unknown", line
-        turns.append({"speaker": speaker, "message": message})
+        turns.append(Turn(speaker=speaker, message=message))
     return turns

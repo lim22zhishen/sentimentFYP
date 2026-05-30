@@ -15,7 +15,6 @@ import os
 # machines without Developer Mode / admin rights. Set before HF libs import.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 
-import streamlit as st
 import torch
 from dotenv import load_dotenv
 
@@ -30,6 +29,8 @@ def get_secret(env_name, secrets_key=None, default=None):
         return value
 
     try:
+        import streamlit as st  # lazy: st.secrets only exists in the UI layer
+
         if secrets_key is not None and secrets_key in st.secrets:
             return st.secrets[secrets_key]
         if env_name in st.secrets:

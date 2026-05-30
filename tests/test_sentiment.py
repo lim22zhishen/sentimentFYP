@@ -4,27 +4,26 @@ import pytest
 
 import src.sentiment as sentiment
 from src.sentiment import split_conversation, _normalize_label, analyze_sentiment
+from src.schemas import SentimentResult, Turn
 
 
 def test_split_conversation_basic():
-    turns = split_conversation("Alice: hi\nBob: hello there\n")
-    assert turns == [
-        {"speaker": "Alice", "message": "hi"},
-        {"speaker": "Bob", "message": "hello there"},
+    assert split_conversation("Alice: hi\nBob: hello there\n") == [
+        Turn("Alice", "hi"),
+        Turn("Bob", "hello there"),
     ]
 
 
 def test_split_conversation_unlabeled_and_blank_lines():
-    turns = split_conversation("just a line\n\n   \nNo colon here")
-    assert turns == [
-        {"speaker": "Unknown", "message": "just a line"},
-        {"speaker": "Unknown", "message": "No colon here"},
+    assert split_conversation("just a line\n\n   \nNo colon here") == [
+        Turn("Unknown", "just a line"),
+        Turn("Unknown", "No colon here"),
     ]
 
 
 def test_split_conversation_splits_on_first_separator_only():
     assert split_conversation("Sue: time is 12: 30 now") == [
-        {"speaker": "Sue", "message": "time is 12: 30 now"}
+        Turn("Sue", "time is 12: 30 now")
     ]
 
 
@@ -51,8 +50,8 @@ def test_analyze_sentiment_normalizes_and_rounds(monkeypatch):
 
     monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)
     assert analyze_sentiment(["a", "b"]) == [
-        {"sentiment": "POSITIVE", "confidence": 0.99},
-        {"sentiment": "POSITIVE", "confidence": 0.99},
+        SentimentResult("POSITIVE", 0.99),
+        SentimentResult("POSITIVE", 0.99),
     ]
 
 
@@ -69,7 +68,7 @@ def test_analyze_sentiment_handles_single_dict_result(monkeypatch):
         return lambda items, **kw: {"label": "label_2", "score": 0.5}
 
     monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)
-    assert analyze_sentiment(["only one"]) == [{"sentiment": "POSITIVE", "confidence": 0.5}]
+    assert analyze_sentiment(["only one"]) == [SentimentResult("POSITIVE", 0.5)]
 
 
 def test_analyze_sentiment_coerces_non_strings(monkeypatch):

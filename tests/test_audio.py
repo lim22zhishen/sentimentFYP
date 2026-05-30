@@ -12,6 +12,7 @@ from src.audio import (
     _load_waveform,
     diarize_audio,
 )
+from src.schemas import SpeakerSegment, TranscriptionResult, TranscriptSegment
 
 
 def _write_wav(path, sr=16000, seconds=0.1, channels=1):
@@ -23,33 +24,41 @@ def _write_wav(path, sr=16000, seconds=0.1, channels=1):
     sf.write(str(path), data, sr)
 
 
+def _transcription(*segments):
+    return TranscriptionResult(
+        transcription="", language="en", translation=None, segments=list(segments)
+    )
+
+
 # --- assign_speakers_to_sentences -----------------------------------------
 
 def test_assign_speakers_largest_overlap():
-    audio_results = {"sentence_timestamps": [
-        {"text": "hello", "start": 0.0, "end": 2.0},
-        {"text": "world", "start": 5.0, "end": 6.0},
-    ]}
+    transcription = _transcription(
+        TranscriptSegment("hello", 0.0, 2.0),
+        TranscriptSegment("world", 5.0, 6.0),
+    )
     segments = [
-        {"start": 0.0, "end": 1.8, "speaker": "Speaker 1"},
-        {"start": 1.8, "end": 4.0, "speaker": "Speaker 2"},
-        {"start": 4.5, "end": 7.0, "speaker": "Speaker 2"},
+        SpeakerSegment(0.0, 1.8, "Speaker 1"),
+        SpeakerSegment(1.8, 4.0, "Speaker 2"),
+        SpeakerSegment(4.5, 7.0, "Speaker 2"),
     ]
-    out = assign_speakers_to_sentences(audio_results, segments)
-    assert [o["speaker"] for o in out] == ["Speaker 1", "Speaker 2"]
-    assert out[0]["text"] == "hello"
+    out = assign_speakers_to_sentences(transcription, segments)
+    assert [o.speaker for o in out] == ["Speaker 1", "Speaker 2"]
+    assert out[0].text == "hello"
 
 
 def test_assign_speakers_no_overlap_is_unknown():
-    audio_results = {"sentence_timestamps": [{"text": "x", "start": 10.0, "end": 11.0}]}
-    segments = [{"start": 0.0, "end": 1.0, "speaker": "Speaker 1"}]
-    out = assign_speakers_to_sentences(audio_results, segments)
-    assert out[0]["speaker"] == "Unknown Speaker"
+    transcription = _transcription(TranscriptSegment("x", 10.0, 11.0))
+    segments = [SpeakerSegment(0.0, 1.0, "Speaker 1")]
+    out = assign_speakers_to_sentences(transcription, segments)
+    assert out[0].speaker == "Unknown Speaker"
 
 
 def test_assign_speakers_empty_inputs():
-    assert assign_speakers_to_sentences({"sentence_timestamps": []}, []) == []
-    assert assign_speakers_to_sentences({}, [{"start": 0, "end": 1, "speaker": "S"}]) == []
+    assert assign_speakers_to_sentences(_transcription(), []) == []
+    assert assign_speakers_to_sentences(
+        _transcription(TranscriptSegment("a", 0.0, 1.0)), []
+    ) == []
 
 
 # --- preprocessing ----------------------------------------------------------
@@ -120,7 +129,7 @@ def test_diarize_audio_maps_speakers(tmp_path):
     _write_wav(p)
     annotation = _Annotation([(_Seg(0.0, 1.0), "spkB"), (_Seg(1.0, 2.0), "spkA")])
     out = diarize_audio(lambda payload: _Output(annotation), str(p))
-    names = {s["original_speaker"]: s["speaker"] for s in out}
+    names = {s.original_speaker: s.speaker for s in out}
     assert names == {"spkA": "Speaker 1", "spkB": "Speaker 2"}
 
 

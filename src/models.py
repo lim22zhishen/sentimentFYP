@@ -1,17 +1,17 @@
 """Cached local model loaders.
 
-Each loader is wrapped in ``st.cache_resource`` so the model is downloaded and
-moved to the device only once per session. Models download from the HuggingFace
-Hub on first use and are then cached on disk (``~/.cache/huggingface``).
+Framework-agnostic core: loaders are memoized with ``functools.lru_cache`` (so a
+model is downloaded and moved to the device only once per process) and raise on
+error instead of touching Streamlit. Models download from the HuggingFace Hub on
+first use and are then cached on disk (``~/.cache/huggingface``).
 
 The heavy third-party imports (faster-whisper, transformers, pyannote, torch)
-are deferred into the loader bodies so that importing this module — and the
-modules that depend on it — stays cheap and test-friendly.
+are deferred into the loader bodies so importing this module stays cheap and
+test-friendly.
 """
 
 import inspect
-
-import streamlit as st
+from functools import lru_cache
 
 from src.config import ASR_COMPUTE_TYPE, DEVICE, HF_DEVICE, HUGGINGFACE_TOKEN
 
@@ -23,14 +23,14 @@ SENTIMENT_MODEL = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
 DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 
 
-@st.cache_resource(show_spinner="Loading speech-to-text model…")
+@lru_cache(maxsize=1)
 def load_asr_model():
     from faster_whisper import WhisperModel
 
     return WhisperModel(ASR_MODEL, device=DEVICE, compute_type=ASR_COMPUTE_TYPE)
 
 
-@st.cache_resource(show_spinner="Loading sentiment model…")
+@lru_cache(maxsize=1)
 def load_sentiment_pipeline():
     from transformers import pipeline as hf_pipeline
 
@@ -41,18 +41,17 @@ def load_sentiment_pipeline():
     )
 
 
-@st.cache_resource(show_spinner="Loading speaker-diarization model…")
+@lru_cache(maxsize=1)
 def load_diarization_pipeline():
     import torch
     from pyannote.audio import Pipeline as DiarizationPipeline
 
     if not HUGGINGFACE_TOKEN:
-        st.error(
+        raise RuntimeError(
             "A HuggingFace token is required for speaker diarization. Add "
-            "`HUGGINGFACE_TOKEN` to your `.env`, and accept the model terms at "
+            "HUGGINGFACE_TOKEN to your .env, and accept the model terms at "
             "https://huggingface.co/pyannote/speaker-diarization-3.1"
         )
-        st.stop()
 
     # The auth keyword changed across pyannote versions (3.x: use_auth_token,
     # 4.x: token); pick whichever the installed version accepts.
