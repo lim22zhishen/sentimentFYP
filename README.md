@@ -11,7 +11,7 @@ changes over time. It uses your **GPU** automatically when one is available.
 - **Text mode** – paste a conversation; each line is labelled
   POSITIVE / NEUTRAL / NEGATIVE with a confidence score and plotted over time.
 - **Audio mode** – upload `wav / mp3 / ogg / m4a / flac`:
-  - Transcription with Whisper (`whisper-large-v3-turbo`)
+  - Transcription with Whisper (`large-v3`)
   - Language detection + English translation
   - Speaker diarization (`pyannote/speaker-diarization-3.1`)
   - Per-speaker, multilingual sentiment and a timeline chart

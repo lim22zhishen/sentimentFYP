@@ -28,7 +28,7 @@ AUDIO_MIME = {
 }
 
 
-def run_text_analysis(conversation):
+def run_text_analysis(conversation: str) -> dict | None:
     """Analyze a pasted conversation. Returns a render-ready results dict."""
     turns = split_conversation(conversation)
     if not turns:
@@ -51,7 +51,7 @@ def run_text_analysis(conversation):
     return {"mode": "text", "df": pd.DataFrame(rows)}
 
 
-def run_audio_analysis(uploaded_file):
+def run_audio_analysis(uploaded_file) -> dict | None:
     """Transcribe, diarize and analyze an uploaded audio file.
 
     Heavy work runs inside a single ``st.status`` block; failures surface as an
@@ -119,7 +119,7 @@ def run_audio_analysis(uploaded_file):
     }
 
 
-def render_results(data):
+def render_results(data: dict) -> None:
     """Render a results dict produced by run_text_analysis / run_audio_analysis."""
     df = data["df"]
 
@@ -162,6 +162,18 @@ if input_type == "Text":
 elif input_type == "Audio":
     st.write("Upload an audio file :")
     uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "ogg", "m4a", "flac"])
+
+# Drop stale results when the input source changes (different mode, or a
+# different uploaded file) so a previous run's output doesn't render under new
+# input. Editing the text box does not clear results — only switching away does.
+if input_type == "Audio" and uploaded_file is not None:
+    input_signature = ("Audio", uploaded_file.name, uploaded_file.size)
+else:
+    input_signature = (input_type, None, None)
+
+if st.session_state.get("input_signature") != input_signature:
+    st.session_state["input_signature"] = input_signature
+    st.session_state.pop("results", None)
 
 # Run analysis on click and stash the result; rendering reads from session state
 # so widget interactions don't re-run the (expensive) pipeline.

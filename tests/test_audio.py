@@ -78,26 +78,68 @@ def test_load_waveform_stereo_is_downmixed(tmp_path):
     assert audio.ndim == 1
 
 
-def test_process_audio_file_wav_passthrough_is_unique(tmp_path):
+class _Upload:
+    """Stand-in for Streamlit's UploadedFile (exposes getvalue + read)."""
+
+    def __init__(self, name, data):
+        self.name = name
+        self._data = data
+
+    def getvalue(self):
+        return self._data
+
+    def read(self):
+        return self._data
+
+
+class _ReadOnlyUpload:
+    """A plain file-like with only read() — exercises the getvalue() fallback."""
+
+    def __init__(self, name, data):
+        self.name = name
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
+def test_process_audio_file_passthrough_16k_mono(tmp_path):
     src = tmp_path / "in.wav"
-    _write_wav(src)
-    raw = src.read_bytes()
+    _write_wav(src, sr=16000, channels=1)
 
-    class FakeUpload:
-        name = "in.wav"
-
-        def __init__(self, data):
-            self._data = data
-
-        def read(self):
-            return self._data
-
-    out = process_audio_file(FakeUpload(raw))
+    out = process_audio_file(_Upload("in.wav", src.read_bytes()))
     try:
-        assert os.path.exists(out)
-        assert out.endswith(".wav")
+        assert os.path.exists(out) and out.endswith(".wav")
         # unique temp name, not the old fixed "temp_audio.wav"
         assert os.path.basename(out) != "temp_audio.wav"
+        info = sf.info(out)
+        assert info.samplerate == 16000 and info.channels == 1
+    finally:
+        if os.path.exists(out):
+            os.remove(out)
+
+
+def test_process_audio_file_normalizes_stereo_44k(tmp_path):
+    src = tmp_path / "in.wav"
+    _write_wav(src, sr=44100, channels=2, seconds=0.2)
+
+    out = process_audio_file(_Upload("in.wav", src.read_bytes()))
+    try:
+        info = sf.info(out)
+        assert info.samplerate == 16000  # resampled
+        assert info.channels == 1  # downmixed to mono
+    finally:
+        if os.path.exists(out):
+            os.remove(out)
+
+
+def test_process_audio_file_falls_back_to_read(tmp_path):
+    src = tmp_path / "in.wav"
+    _write_wav(src)
+
+    out = process_audio_file(_ReadOnlyUpload("in.wav", src.read_bytes()))
+    try:
+        assert os.path.exists(out) and out.endswith(".wav")
     finally:
         if os.path.exists(out):
             os.remove(out)

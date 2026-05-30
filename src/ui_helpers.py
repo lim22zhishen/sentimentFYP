@@ -35,7 +35,7 @@ def style_y_axis(fig):
     )
 
 
-def render_sentiment_table(df):
+def render_sentiment_table(df: pd.DataFrame) -> None:
     """Format numeric columns and render the styled sentiment table."""
     if df.empty:
         st.info("No rows to display.")
@@ -48,7 +48,7 @@ def render_sentiment_table(df):
     st.dataframe(display.style.apply(style_table, axis=1))
 
 
-def render_sentiment_chart(df, x_col, x_title):
+def render_sentiment_chart(df: pd.DataFrame, x_col: str, x_title: str) -> None:
     """Plot sentiment (mapped to -1/0/1) over ``x_col``, colored by speaker."""
     if df.empty:
         return
@@ -64,7 +64,7 @@ def render_sentiment_chart(df, x_col, x_title):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_speaker_summary(df):
+def render_speaker_summary(df: pd.DataFrame) -> None:
     """Show per-speaker line counts and average sentiment (most-positive first)."""
     if df.empty or "Speaker" not in df.columns:
         return
@@ -84,7 +84,7 @@ def render_speaker_summary(df):
     st.dataframe(summary, hide_index=True)
 
 
-def build_transcript(data):
+def build_transcript(data: dict) -> str:
     """Build a plain-text transcript preserving language, speakers and timestamps.
 
     Pure function (no Streamlit) so it can be unit-tested. Expects the audio
@@ -106,7 +106,7 @@ def build_transcript(data):
     return "\n".join(lines)
 
 
-def render_export_buttons(data):
+def render_export_buttons(data: dict) -> None:
     """Render CSV / JSON (and transcript, for audio) download buttons."""
     df = data["df"]
     if df.empty:

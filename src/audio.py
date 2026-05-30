@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 TARGET_SAMPLE_RATE = 16000
 
 
-def _ffmpeg_exe():
+def _ffmpeg_exe() -> str:
     """Return a usable ffmpeg executable path.
 
     Prefers a system ``ffmpeg`` on PATH; otherwise falls back to the binary
@@ -44,22 +44,32 @@ def _ffmpeg_exe():
         return "ffmpeg"
 
 
-def process_audio_file(uploaded_file):
-    """Save an uploaded file and convert it to 16 kHz mono WAV for processing.
+def _read_upload_bytes(uploaded_file) -> bytes:
+    """Read all bytes from an upload, independent of its read cursor.
 
-    Uses unique temp paths (``tempfile``) so two overlapping runs can't clobber
-    each other's ``temp_audio.wav``. Returns the path to a WAV the caller is
-    responsible for deleting.
+    Streamlit's ``UploadedFile`` has a stateful cursor, so ``.read()`` can return
+    empty if the buffer was already consumed; ``.getvalue()`` always returns the
+    full content. Fall back to ``.read()`` for plain file-likes.
     """
-    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+    getvalue = getattr(uploaded_file, "getvalue", None)
+    if callable(getvalue):
+        return getvalue()
+    return uploaded_file.read()
 
-    fd, src_path = tempfile.mkstemp(suffix=file_extension or ".bin", prefix="sent_audio_")
-    with os.fdopen(fd, "wb") as f:
-        f.write(uploaded_file.read())
 
-    if file_extension == ".wav":
-        return src_path
+def _needs_conversion(path: str, file_extension: str) -> bool:
+    """True unless ``path`` is already a 16 kHz mono WAV (so it can pass through)."""
+    if file_extension != ".wav":
+        return True
+    try:
+        info = sf.info(path)
+        return not (info.samplerate == TARGET_SAMPLE_RATE and info.channels == 1)
+    except Exception:
+        return True  # unreadable header -> let ffmpeg normalize it
 
+
+def _convert_to_wav(src_path: str) -> str:
+    """Convert any audio file to a unique 16 kHz mono WAV via ffmpeg."""
     wav_fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="sent_audio_")
     os.close(wav_fd)
     try:
@@ -69,28 +79,47 @@ def process_audio_file(uploaded_file):
             check=True, capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        for path in (src_path, wav_path):
-            if os.path.exists(path):
-                os.remove(path)
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
         raise RuntimeError(
             f"Failed to convert audio: {e.stderr.decode(errors='ignore')}"
         ) from e
+    return wav_path
+
+
+def process_audio_file(uploaded_file) -> str:
+    """Save an upload and ensure it's a 16 kHz mono WAV for processing.
+
+    Every input is normalized to 16 kHz mono so the models see consistent audio;
+    a WAV that is already 16 kHz mono is passed through without re-encoding. Uses
+    unique temp paths (``tempfile``) so two overlapping runs can't clobber each
+    other. Returns the path to a WAV the caller is responsible for deleting.
+    """
+    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+
+    fd, src_path = tempfile.mkstemp(suffix=file_extension or ".bin", prefix="sent_audio_")
+    with os.fdopen(fd, "wb") as f:
+        f.write(_read_upload_bytes(uploaded_file))
+
+    if not _needs_conversion(src_path, file_extension):
+        return src_path
+
+    try:
+        return _convert_to_wav(src_path)
     finally:
         if os.path.exists(src_path):
             os.remove(src_path)
 
-    return wav_path
 
-
-def _load_waveform(wav_path):
-    """Load a WAV file as a mono float32 numpy array at TARGET_SAMPLE_RATE."""
+def _load_waveform(wav_path: str) -> tuple[np.ndarray, int]:
+    """Load a WAV file as a mono float32 numpy array at its native sample rate."""
     audio, sr = sf.read(wav_path, dtype="float32")
     if audio.ndim > 1:  # stereo -> mono
         audio = audio.mean(axis=1)
     return np.ascontiguousarray(audio), sr
 
 
-def transcribe_audio(wav_path):
+def transcribe_audio(wav_path: str) -> TranscriptionResult:
     """Transcribe audio locally with faster-whisper.
 
     Returns a :class:`TranscriptionResult` with the text, detected language,
@@ -130,7 +159,7 @@ def transcribe_audio(wav_path):
     )
 
 
-def diarize_audio(diarization_pipeline, wav_path):
+def diarize_audio(diarization_pipeline, wav_path: str) -> list[SpeakerSegment]:
     """Run speaker diarization and return a list of :class:`SpeakerSegment`.
 
     The audio is loaded in-memory and passed as a waveform dict, which avoids
@@ -175,7 +204,9 @@ def diarize_audio(diarization_pipeline, wav_path):
     ]
 
 
-def assign_speakers_to_sentences(transcription, speaker_segments):
+def assign_speakers_to_sentences(
+    transcription: TranscriptionResult, speaker_segments: list[SpeakerSegment]
+) -> list[AlignedSentence]:
     """Assign each transcript segment to the speaker with the largest overlap.
 
     Returns a list of :class:`AlignedSentence`.

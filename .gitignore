@@ -13,9 +13,6 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 
-# App runtime artifacts
-temp_audio.*
-
 # OS / editor
 .DS_Store
 Thumbs.db

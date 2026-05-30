@@ -17,11 +17,11 @@ _LABEL_MAP = {
 }
 
 
-def _normalize_label(label):
+def _normalize_label(label) -> str:
     return _LABEL_MAP.get(str(label).strip().lower(), str(label).strip().upper())
 
 
-def analyze_sentiment(texts):
+def analyze_sentiment(texts: list[str]) -> list[SentimentResult]:
     """Classify each string in ``texts``.
 
     Returns a list of :class:`SentimentResult`, one per input.
@@ -46,7 +46,7 @@ def analyze_sentiment(texts):
     ]
 
 
-def split_conversation(text):
+def split_conversation(text: str) -> list[Turn]:
     """Split free-form conversation text into per-line :class:`Turn` objects.
 
     Lines shaped like ``Speaker: message`` are split into speaker + message;
