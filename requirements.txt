@@ -1,10 +1,25 @@
-matplotlib == 3.7.1
-pandas == 2.1.4
-transformers==4.44.2
-plotly==5.24.1
-streamlit==1.40.2
-tensorflow==2.17.0
-tf_keras==2.17.0
-openai
-ffmpeg-python
-pyannote.audio==3.3.2
+# Requires Python 3.10 or 3.11.
+#
+# GPU (NVIDIA): the --extra-index-url below pulls CUDA 12.8 torch builds, which
+# are required for RTX 50-series / Blackwell GPUs (and work fine on older CUDA
+# cards too). CPU-only users can drop the extra index and install plain torch.
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+streamlit>=1.40
+pandas>=2.2,<3
+plotly>=5.24
+python-dotenv>=1.0
+
+# Local inference
+torch>=2.7
+torchaudio>=2.7
+faster-whisper>=1.1          # GPU transcription/translation (CTranslate2, no torchcodec)
+# transformers <5 for the sentiment classifier: the 5.x audio pipelines couple
+# to torchcodec (fails to load on Windows). Sentiment is text-only, but the pin
+# keeps the install torchcodec-free where it matters.
+transformers>=4.44,<5
+soundfile>=0.12              # read WAV into memory (for diarization waveform)
+imageio-ffmpeg>=0.5          # bundled ffmpeg for converting uploads to WAV
+
+# Speaker diarization
+pyannote.audio>=4.0
