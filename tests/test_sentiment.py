@@ -31,6 +31,23 @@ def test_split_conversation_empty():
     assert split_conversation("") == []
 
 
+@pytest.mark.parametrize("line,expected", [
+    ("Alice:hi there", Turn("Alice", "hi there")),
+    ("Speaker 1 : hello", Turn("Speaker 1", "hello")),
+    ("Dr. Smith (Cardiology): stable", Turn("Dr. Smith (Cardiology)", "stable")),
+    # a sentence before the colon is not a speaker name
+    ("I think the answer is: no", Turn("Unknown", "I think the answer is: no")),
+    # times and URLs are not speaker separators
+    ("Meeting moved to 12:30", Turn("Unknown", "Meeting moved to 12:30")),
+    ("https://example.com is down", Turn("Unknown", "https://example.com is down")),
+    ("Bob: call me at 12:30", Turn("Bob", "call me at 12:30")),
+    # a label with nothing after it stays a plain line
+    ("Alice:", Turn("Unknown", "Alice:")),
+])
+def test_split_conversation_speaker_detection(line, expected):
+    assert split_conversation(line) == [expected]
+
+
 @pytest.mark.parametrize("raw,expected", [
     ("positive", "POSITIVE"),
     ("Negative", "NEGATIVE"),

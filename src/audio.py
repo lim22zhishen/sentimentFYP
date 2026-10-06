@@ -26,6 +26,21 @@ logger = logging.getLogger(__name__)
 
 TARGET_SAMPLE_RATE = 16000
 
+# MIME types for the browser audio player, one per extension the uploader accepts.
+AUDIO_MIME = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+}
+
+
+def audio_mime_type(file_name: str) -> str:
+    """Return the MIME type for an uploaded audio file, by extension."""
+    file_extension = os.path.splitext(file_name)[1].lower()
+    return AUDIO_MIME.get(file_extension, "audio/wav")
+
 
 def _ffmpeg_exe() -> str:
     """Return a usable ffmpeg executable path.

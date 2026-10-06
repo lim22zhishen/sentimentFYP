@@ -1,5 +1,4 @@
 import os
-import datetime
 
 import pandas as pd
 import streamlit as st
@@ -11,6 +10,7 @@ from src.audio import (
     diarize_audio,
     assign_speakers_to_sentences,
     process_audio_file,
+    audio_mime_type,
 )
 from src.models import load_diarization_pipeline
 from src.ui_helpers import (
@@ -20,28 +20,24 @@ from src.ui_helpers import (
     render_export_buttons,
 )
 
-AUDIO_MIME = {
-    ".mp3": "audio/mp3",
-    ".ogg": "audio/ogg",
-    ".oga": "audio/ogg",
-    ".m4a": "audio/mp4",
-}
-
 
 def run_text_analysis(conversation: str) -> dict | None:
-    """Analyze a pasted conversation. Returns a render-ready results dict."""
+    """Analyze a pasted conversation. Returns a render-ready results dict.
+
+    Pasted text carries no timing, so rows are ordered by turn number rather
+    than given invented timestamps.
+    """
     turns = split_conversation(conversation)
     if not turns:
         st.warning("No text to analyze.")
         return None
 
     sentiments = analyze_sentiment([t.message for t in turns])
-    base_time = datetime.datetime.now()
 
     rows = []
-    for i, (turn, sentiment) in enumerate(zip(turns, sentiments)):
+    for i, (turn, sentiment) in enumerate(zip(turns, sentiments), start=1):
         rows.append({
-            "Timestamp": (base_time + datetime.timedelta(seconds=i * 10)).strftime('%Y-%m-%d %H:%M:%S'),
+            "Turn": i,
             "Speaker": turn.speaker,
             "Message": turn.message,
             "Sentiment": sentiment.sentiment,
@@ -59,7 +55,6 @@ def run_audio_analysis(uploaded_file) -> dict | None:
     result dict is returned so the caller can persist and re-render it without
     recomputing.
     """
-    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
     audio_bytes = uploaded_file.getvalue()
     temp_file_path = None
 
@@ -115,7 +110,7 @@ def run_audio_analysis(uploaded_file) -> dict | None:
         "transcription": transcription.transcription,
         "translation": transcription.translation,
         "audio_bytes": audio_bytes,
-        "audio_format": AUDIO_MIME.get(file_extension, "audio/wav"),
+        "audio_format": audio_mime_type(uploaded_file.name),
     }
 
 
@@ -142,7 +137,7 @@ def render_results(data: dict) -> None:
         st.write("### Conversation with Sentiment Labels")
         render_sentiment_table(df)
         render_speaker_summary(df)
-        render_sentiment_chart(df, x_col="Timestamp", x_title="Timestamp")
+        render_sentiment_chart(df, x_col="Turn", x_title="Turn")
 
     render_export_buttons(data)
 

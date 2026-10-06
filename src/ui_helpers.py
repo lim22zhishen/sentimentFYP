@@ -61,7 +61,7 @@ def render_sentiment_chart(df: pd.DataFrame, x_col: str, x_title: str) -> None:
     )
     style_y_axis(fig)
     fig.update_traces(marker=dict(size=10))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_speaker_summary(df: pd.DataFrame) -> None:

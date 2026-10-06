@@ -8,6 +8,7 @@ import pytest
 
 from src.audio import (
     assign_speakers_to_sentences,
+    audio_mime_type,
     process_audio_file,
     _load_waveform,
     diarize_audio,
@@ -59,6 +60,21 @@ def test_assign_speakers_empty_inputs():
     assert assign_speakers_to_sentences(
         _transcription(TranscriptSegment("a", 0.0, 1.0)), []
     ) == []
+
+
+# --- audio_mime_type ----------------------------------------------------------
+
+@pytest.mark.parametrize("name,expected", [
+    ("a.wav", "audio/wav"),
+    ("a.mp3", "audio/mpeg"),
+    ("a.ogg", "audio/ogg"),
+    ("a.m4a", "audio/mp4"),
+    ("a.flac", "audio/flac"),
+    ("A.FLAC", "audio/flac"),
+    ("noext", "audio/wav"),
+])
+def test_audio_mime_type(name, expected):
+    assert audio_mime_type(name) == expected
 
 
 # --- preprocessing ----------------------------------------------------------

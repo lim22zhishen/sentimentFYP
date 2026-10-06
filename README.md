@@ -8,8 +8,9 @@ changes over time. It uses your **GPU** automatically when one is available.
 
 ## Features
 
-- **Text mode** – paste a conversation; each line is labelled
-  POSITIVE / NEUTRAL / NEGATIVE with a confidence score and plotted over time.
+- **Text mode** – paste a conversation, one turn per line, optionally prefixed
+  with the speaker (`Alice: hello`); each line is labelled
+  POSITIVE / NEUTRAL / NEGATIVE with a confidence score and plotted turn by turn.
 - **Audio mode** – upload `wav / mp3 / ogg / m4a / flac`:
   - Transcription with Whisper (`large-v3`)
   - Language detection + English translation
@@ -40,6 +41,7 @@ sentimentFYP/
 ├── src/
 │   ├── config.py           # token loading + device (CPU/GPU) selection
 │   ├── models.py           # cached loaders for the 3 local models
+│   ├── schemas.py          # dataclasses passed between pipeline and UI
 │   ├── sentiment.py        # local sentiment + conversation splitting
 │   ├── audio.py            # transcription, translation, diarization, ffmpeg
 │   └── ui_helpers.py       # tables, charts, speaker summary, exports
@@ -131,15 +133,17 @@ Plan for a few GB of download and disk on first use:
 
 What to expect:
 - **First audio analysis is slow** — it downloads all three models *and* warms
-  them up on the GPU. Later runs reuse the cached, already-loaded models
-  (`st.cache_resource`), so they're much faster.
+  them up on the GPU. Later runs reuse the already-loaded models (each loader
+  is cached for the life of the Streamlit process with `functools.lru_cache`),
+  so they're much faster.
 - **Text-only mode** needs just the sentiment model (no HF token required).
 - VRAM: the defaults target an ~8 GB GPU. On a smaller card, see Troubleshooting.
 
 ## Tests
 
 Pure logic (conversation splitting, label normalization, speaker assignment,
-audio preprocessing, transcript building) is covered by fast unit tests that
+audio preprocessing, transcript building) and the text-mode app flow (driven
+with Streamlit's `AppTest`, classifier stubbed) are covered by fast tests that
 need no GPU or model downloads:
 
 ```powershell
