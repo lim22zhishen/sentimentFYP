@@ -3,7 +3,7 @@
 import pytest
 
 import src.sentiment as sentiment
-from src.sentiment import split_conversation, _normalize_label, analyze_sentiment
+from src.sentiment import split_conversation, _normalize_label, _to_result, analyze_sentiment
 from src.schemas import SentimentResult, Turn
 
 
@@ -61,15 +61,59 @@ def test_normalize_label(raw, expected):
     assert _normalize_label(raw) == expected
 
 
+def _scores(positive, neutral, negative):
+    """One input's classifier output with top_k=None: every label's probability."""
+    return [
+        {"label": "positive", "score": positive},
+        {"label": "neutral", "score": neutral},
+        {"label": "negative", "score": negative},
+    ]
+
+
 def test_analyze_sentiment_normalizes_and_rounds(monkeypatch):
     def fake_loader():
-        return lambda items, **kw: [{"label": "positive", "score": 0.987} for _ in items]
+        return lambda items, **kw: [_scores(0.987, 0.008, 0.005) for _ in items]
 
     monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)
     assert analyze_sentiment(["a", "b"]) == [
-        SentimentResult("POSITIVE", 0.99),
-        SentimentResult("POSITIVE", 0.99),
+        SentimentResult("POSITIVE", 0.99, 0.98),
+        SentimentResult("POSITIVE", 0.99, 0.98),
     ]
+
+
+def test_analyze_sentiment_polarity_uses_all_probabilities(monkeypatch):
+    def fake_loader():
+        return lambda items, **kw: [
+            _scores(0.10, 0.20, 0.70),  # confidently negative
+            _scores(0.45, 0.10, 0.45),  # torn between positive and negative
+            _scores(0.30, 0.40, 0.30),  # weakly neutral
+        ]
+
+    monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)
+    neg, torn, neu = analyze_sentiment(["x", "y", "z"])
+    assert (neg.sentiment, neg.confidence, neg.polarity) == ("NEGATIVE", 0.7, -0.6)
+    assert torn.polarity == 0.0
+    assert (neu.sentiment, neu.confidence, neu.polarity) == ("NEUTRAL", 0.4, 0.0)
+
+
+def test_polarity_has_no_negative_zero():
+    # -0.0002 rounds to -0.0, which would display as "-0.00"
+    result = _to_result(_scores(0.3330, 0.3338, 0.3332))
+    assert str(result.polarity) == "0.0"
+
+
+def test_analyze_sentiment_requests_every_label(monkeypatch):
+    captured = {}
+
+    def fake_loader():
+        def clf(items, **kw):
+            captured.update(kw)
+            return [_scores(1.0, 0.0, 0.0) for _ in items]
+        return clf
+
+    monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)
+    analyze_sentiment(["a"])
+    assert "top_k" in captured and captured["top_k"] is None
 
 
 def test_analyze_sentiment_empty_does_not_load_model(monkeypatch):
@@ -80,12 +124,17 @@ def test_analyze_sentiment_empty_does_not_load_model(monkeypatch):
     assert analyze_sentiment([]) == []
 
 
-def test_analyze_sentiment_handles_single_dict_result(monkeypatch):
+def test_analyze_sentiment_handles_single_unnested_result(monkeypatch):
     def fake_loader():
-        return lambda items, **kw: {"label": "label_2", "score": 0.5}
+        # A flat list of label scores (not wrapped per input), with LABEL_N names.
+        return lambda items, **kw: [
+            {"label": "LABEL_2", "score": 0.5},
+            {"label": "LABEL_1", "score": 0.3},
+            {"label": "LABEL_0", "score": 0.2},
+        ]
 
     monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)
-    assert analyze_sentiment(["only one"]) == [SentimentResult("POSITIVE", 0.5)]
+    assert analyze_sentiment(["only one"]) == [SentimentResult("POSITIVE", 0.5, 0.3)]
 
 
 def test_analyze_sentiment_coerces_non_strings(monkeypatch):
@@ -94,7 +143,7 @@ def test_analyze_sentiment_coerces_non_strings(monkeypatch):
     def fake_loader():
         def clf(items, **kw):
             captured["items"] = items
-            return [{"label": "neutral", "score": 1.0} for _ in items]
+            return [_scores(0.0, 1.0, 0.0) for _ in items]
         return clf
 
     monkeypatch.setattr(sentiment, "load_sentiment_pipeline", fake_loader)

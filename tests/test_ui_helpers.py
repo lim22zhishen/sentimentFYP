@@ -1,12 +1,22 @@
-"""Unit tests for src.ui_helpers pure helpers (transcript building, constants)."""
+"""Unit tests for src.ui_helpers pure helpers (transcript building, speaker summary)."""
 
 import pandas as pd
 
-from src.ui_helpers import build_transcript, SENTIMENT_MAP
+from src.ui_helpers import build_transcript, speaker_summary
 
 
-def test_sentiment_map_values():
-    assert SENTIMENT_MAP == {"positive": 1, "neutral": 0, "negative": -1}
+def test_speaker_summary_averages_polarity_and_sorts():
+    df = pd.DataFrame([
+        {"Speaker": "Alice", "Sentiment": "POSITIVE", "Polarity": 0.9},
+        {"Speaker": "Alice", "Sentiment": "NEUTRAL", "Polarity": 0.1},
+        {"Speaker": "Bob", "Sentiment": "NEGATIVE", "Polarity": -0.8},
+        {"Speaker": "Cara", "Sentiment": "NEUTRAL", "Polarity": 0.05},
+    ])
+    summary = speaker_summary(df)
+    assert list(summary["Speaker"]) == ["Alice", "Cara", "Bob"]
+    assert list(summary["Lines"]) == [2, 1, 1]
+    assert list(summary["AvgSentiment"]) == [0.5, 0.05, -0.8]
+    assert list(summary["Mood"]) == ["Positive", "Neutral", "Negative"]
 
 
 def test_build_transcript_preserves_language_speakers_timestamps():

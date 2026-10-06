@@ -2,9 +2,9 @@
 
 A [Streamlit](https://streamlit.io/) app that analyzes sentiment from **text** or
 **audio** — running **entirely on local models** (no OpenAI / external API). For
-audio it transcribes speech (Whisper), detects/translates the language,
-identifies who spoke when (pyannote diarization), and charts how sentiment
-changes over time. It uses your **GPU** automatically when one is available.
+audio it transcribes speech (Whisper), detects the language (and can translate
+it to English), identifies who spoke when (pyannote diarization), and charts how
+sentiment changes over time. It uses your **GPU** automatically when one is available.
 
 ## Features
 
@@ -12,10 +12,20 @@ changes over time. It uses your **GPU** automatically when one is available.
   with the speaker (`Alice: hello`); each line is labelled
   POSITIVE / NEUTRAL / NEGATIVE with a confidence score and plotted turn by turn.
 - **Audio mode** – upload `wav / mp3 / ogg / m4a / flac`:
-  - Transcription with Whisper (`large-v3`)
-  - Language detection + English translation
-  - Speaker diarization (`pyannote/speaker-diarization-3.1`)
+  - Transcription with Whisper (`large-v3` on GPU, `small` on CPU — configurable),
+    with voice-activity detection so silence and music aren't transcribed
+  - Language detection, plus optional English translation (a tick box — it runs
+    Whisper a second time, so it roughly doubles transcription time)
+  - Speaker diarization (`pyannote/speaker-diarization-3.1`); you can give the
+    number of speakers if you know it, which improves accuracy
+  - Word-level speaker alignment: when one Whisper segment covers two speakers
+    (e.g. a question and its quick answer), it is split between them
   - Per-speaker, multilingual sentiment and a timeline chart
+- **Chart & summary** – each point is the sentiment *polarity*,
+  P(positive) − P(negative), from −1 to +1, so a confident and a borderline
+  prediction look different; the per-speaker summary averages it.
+- **Exports** – CSV / JSON of the results table, plus a timestamped transcript
+  for audio.
 
 ## Models (downloaded on first run)
 
@@ -24,7 +34,7 @@ cached on disk (`~/.cache/huggingface`, a few GB total):
 
 | Task | Model | Library |
 |---|---|---|
-| Speech-to-text / translation | Whisper `large-v3` | faster-whisper (CTranslate2) |
+| Speech-to-text / translation | Whisper `large-v3` (GPU) / `small` (CPU) | faster-whisper (CTranslate2) |
 | Sentiment (multilingual) | `cardiffnlp/twitter-xlm-roberta-base-sentiment` | transformers |
 | Speaker diarization (gated) | `pyannote/speaker-diarization-3.1` | pyannote.audio |
 
@@ -32,6 +42,10 @@ cached on disk (`~/.cache/huggingface`, a few GB total):
 > ASR pipeline, because the latter routes audio through `torchcodec`, which
 > doesn't load on Windows. Diarization feeds pyannote an in-memory waveform for
 > the same reason.
+
+To use a different Whisper size, set `ASR_MODEL` in `.env` (e.g.
+`ASR_MODEL=medium`). Any faster-whisper model name works: `tiny`, `base`,
+`small`, `medium`, `large-v3`, `turbo`, …
 
 ## Project structure
 
@@ -44,10 +58,15 @@ sentimentFYP/
 │   ├── schemas.py          # dataclasses passed between pipeline and UI
 │   ├── sentiment.py        # local sentiment + conversation splitting
 │   ├── audio.py            # transcription, translation, diarization, ffmpeg
+│   ├── evaluation.py       # accuracy / F1 / confusion-matrix metrics
 │   └── ui_helpers.py       # tables, charts, speaker summary, exports
-├── tests/                  # fast unit tests (no GPU / no downloads)
+├── scripts/
+│   ├── evaluate_sentiment.py   # score the sentiment model on a labelled CSV
+│   └── sample_sentiment.csv    # example of the CSV format
+├── tests/                  # fast tests (no GPU / no downloads)
+├── .github/workflows/      # CI: runs the tests on every push
 ├── .streamlit/config.toml
-├── .env.example            # template for the HuggingFace token
+├── .env.example            # template for the HuggingFace token + options
 ├── requirements.txt
 ├── requirements-dev.txt    # test deps (pytest)
 └── README.md
@@ -127,7 +146,8 @@ Plan for a few GB of download and disk on first use:
 
 | Model | Approx. download | When it loads |
 |---|---|---|
-| Whisper `large-v3` (faster-whisper) | ~1.5 GB | first transcription |
+| Whisper `large-v3` (faster-whisper, GPU default) | ~1.5 GB | first transcription |
+| Whisper `small` (faster-whisper, CPU default) | ~0.5 GB | first transcription |
 | `cardiffnlp/twitter-xlm-roberta-base-sentiment` | ~1.1 GB | first sentiment scoring |
 | `pyannote/speaker-diarization-3.1` (+ segmentation/embedding) | ~0.5 GB | first diarization |
 
@@ -141,15 +161,36 @@ What to expect:
 
 ## Tests
 
-Pure logic (conversation splitting, label normalization, speaker assignment,
-audio preprocessing, transcript building) and the text-mode app flow (driven
-with Streamlit's `AppTest`, classifier stubbed) are covered by fast tests that
-need no GPU or model downloads:
+Pure logic (conversation splitting, label normalization, polarity, speaker
+assignment, audio preprocessing, transcript building, evaluation metrics) and
+the text and audio app flows (driven with Streamlit's `AppTest`, models
+stubbed) are covered by fast tests that need no GPU or model downloads:
 
 ```powershell
 pip install -r requirements-dev.txt
 pytest
 ```
+
+The diarization tests need PyTorch; without it they're skipped and everything
+else still runs. GitHub Actions runs the full suite on every push
+(`.github/workflows/tests.yml`).
+
+## Evaluating the sentiment model
+
+For the report, you can measure how well the sentiment model agrees with
+human labels. Prepare a CSV with a `text` column and a `label` column
+(`negative` / `neutral` / `positive`, or `neg` / `neu` / `pos`), then run:
+
+```powershell
+python scripts/evaluate_sentiment.py my_labelled_data.csv
+# other column names, and save the misclassified rows for error analysis:
+python scripts/evaluate_sentiment.py data.csv --text-col sentence --label-col sentiment --errors misclassified.csv
+```
+
+It prints accuracy, macro F1, per-label precision / recall / F1 and a confusion
+matrix. `scripts/sample_sentiment.csv` shows the format; at 15 rows it is only
+an example. For meaningful numbers, use a few hundred labelled lines, ideally
+from the kind of conversations the app is meant for.
 
 ## Troubleshooting
 
@@ -167,9 +208,12 @@ pytest
   A HuggingFace cache symlink issue on Windows without Developer Mode. It's
   handled automatically (`HF_HUB_DISABLE_SYMLINKS=1` is set in `src/config.py`);
   if you hit it elsewhere, set that env var before launching.
-- **CUDA out of memory (smaller GPUs).** Edit `src/models.py`: use a smaller
-  Whisper (`ASR_MODEL = "medium"` or `"small"`), or force CPU-friendly compute by
+- **CUDA out of memory (smaller GPUs).** Use a smaller Whisper by adding
+  `ASR_MODEL=medium` (or `small`) to `.env`, or force CPU-friendly compute by
   running without a GPU (the app falls back to `int8` on CPU automatically).
+- **Transcription is very slow on CPU.** The CPU default is Whisper `small`;
+  `ASR_MODEL=base` or `tiny` is faster but less accurate. Leave the translation
+  box unticked unless you need it — it doubles the transcription work.
 - **`ffmpeg` not found.** No action needed — it's bundled via `imageio-ffmpeg`.
 - **401 / gated model error on diarization.** Accept the terms at
   <https://huggingface.co/pyannote/speaker-diarization-3.1> and confirm your
@@ -178,7 +222,7 @@ pytest
 ## Notes
 
 - **GPU is used automatically** when CUDA is available; otherwise it falls back
-  to CPU (`app.py` shows which device is active).
+  to CPU (the app shows which device and Whisper model are active).
 - This app is built for **local** use. Hosted Streamlit Community Cloud has no
   GPU and little RAM, so the large Whisper/diarization models won't run there
   without swapping in much smaller models.

@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from itertools import groupby
 
 import numpy as np
 import soundfile as sf
@@ -20,11 +21,18 @@ from src.schemas import (
     SpeakerSegment,
     TranscriptionResult,
     TranscriptSegment,
+    TranscriptWord,
 )
 
 logger = logging.getLogger(__name__)
 
 TARGET_SAMPLE_RATE = 16000
+
+UNKNOWN_SPEAKER = "Unknown Speaker"
+# Whisper and pyannote boundaries rarely line up exactly, so a word or segment
+# that falls in a gap between diarized turns goes to the nearest speaker when
+# that speaker is at most this many seconds away.
+MAX_SPEAKER_GAP = 1.0
 
 # MIME types for the browser audio player, one per extension the uploader accepts.
 AUDIO_MIME = {
@@ -134,34 +142,50 @@ def _load_waveform(wav_path: str) -> tuple[np.ndarray, int]:
     return np.ascontiguousarray(audio), sr
 
 
-def transcribe_audio(wav_path: str) -> TranscriptionResult:
+def transcribe_audio(wav_path: str, translate: bool = False) -> TranscriptionResult:
     """Transcribe audio locally with faster-whisper.
 
     Returns a :class:`TranscriptionResult` with the text, detected language,
-    per-segment timestamps, and an English translation when needed.
+    per-segment and per-word timestamps, and — when ``translate`` is set and the
+    audio isn't English — an English translation. Translating runs Whisper a
+    second time over the whole file, so it roughly doubles the work.
     """
     from src.models import load_asr_model  # lazy: keeps module import cheap
 
     model = load_asr_model()
 
-    segments, info = model.transcribe(wav_path, beam_size=5)
+    # vad_filter skips silence and music, where Whisper otherwise tends to
+    # invent text; word timestamps let speaker alignment split a segment that
+    # spans a change of speaker.
+    segments, info = model.transcribe(
+        wav_path, beam_size=5, vad_filter=True, word_timestamps=True
+    )
     transcript_segments = []
     parts = []
     for seg in segments:  # generator — consume once
         text = seg.text.strip()
+        if not text:
+            continue
         parts.append(text)
+        words = [
+            TranscriptWord(text=w.word, start=float(w.start), end=float(w.end))
+            for w in (seg.words or [])
+        ]
         transcript_segments.append(
-            TranscriptSegment(text=text, start=float(seg.start), end=float(seg.end))
+            TranscriptSegment(
+                text=text, start=float(seg.start), end=float(seg.end), words=words
+            )
         )
 
     transcription = " ".join(parts).strip()
     primary_language = info.language or "unknown"
 
-    # Translate to English (single pass, for display) when not already English.
     translation = None
-    if primary_language not in ("en", "unknown"):
+    if translate and primary_language not in ("en", "unknown"):
         try:
-            tr_segments, _ = model.transcribe(wav_path, task="translate", beam_size=5)
+            tr_segments, _ = model.transcribe(
+                wav_path, task="translate", beam_size=5, vad_filter=True
+            )
             translation = " ".join(s.text.strip() for s in tr_segments).strip()
         except Exception as e:
             logger.warning("Translation failed: %s", e)
@@ -174,11 +198,15 @@ def transcribe_audio(wav_path: str) -> TranscriptionResult:
     )
 
 
-def diarize_audio(diarization_pipeline, wav_path: str) -> list[SpeakerSegment]:
+def diarize_audio(
+    diarization_pipeline, wav_path: str, num_speakers: int | None = None
+) -> list[SpeakerSegment]:
     """Run speaker diarization and return a list of :class:`SpeakerSegment`.
 
     The audio is loaded in-memory and passed as a waveform dict, which avoids
     pyannote 4.x's file-decoding path (torchcodec), unreliable on Windows.
+    ``num_speakers``, when known, tells pyannote exactly how many speakers to
+    find instead of estimating it.
 
     Raises ``RuntimeError`` on failure or an empty result rather than returning a
     fabricated single-speaker segment — a bad diarization should surface as an
@@ -189,8 +217,11 @@ def diarize_audio(diarization_pipeline, wav_path: str) -> list[SpeakerSegment]:
     audio, sr = _load_waveform(wav_path)
     waveform = torch.from_numpy(audio).unsqueeze(0)  # (channel, time)
 
+    options = {"num_speakers": num_speakers} if num_speakers else {}
     try:
-        diarization_result = diarization_pipeline({"waveform": waveform, "sample_rate": sr})
+        diarization_result = diarization_pipeline(
+            {"waveform": waveform, "sample_rate": sr}, **options
+        )
     except Exception as e:
         raise RuntimeError(f"Speaker diarization failed: {e}") from e
 
@@ -219,12 +250,71 @@ def diarize_audio(diarization_pipeline, wav_path: str) -> list[SpeakerSegment]:
     ]
 
 
+def _speaker_for_span(
+    start: float, end: float, speaker_segments: list[SpeakerSegment]
+) -> str | None:
+    """The speaker overlapping ``[start, end]`` the most.
+
+    With no overlap (e.g. the span sits in a gap between turns, or is a
+    zero-length word), falls back to the nearest speaker within
+    ``MAX_SPEAKER_GAP`` seconds; returns ``None`` if there is none.
+    """
+    best_speaker, best_overlap = None, 0.0
+    nearest_speaker, nearest_gap = None, float("inf")
+    for sp in speaker_segments:
+        overlap = min(end, sp.end) - max(start, sp.start)  # negative = gap
+        if overlap > best_overlap:
+            best_speaker, best_overlap = sp.speaker, overlap
+        gap = max(-overlap, 0.0)
+        if gap < nearest_gap:
+            nearest_speaker, nearest_gap = sp.speaker, gap
+    if best_speaker:
+        return best_speaker
+    return nearest_speaker if nearest_gap <= MAX_SPEAKER_GAP else None
+
+
+def _split_segment_by_speaker(
+    seg: TranscriptSegment, speaker_segments: list[SpeakerSegment]
+) -> list[AlignedSentence]:
+    """Assign each word of ``seg`` a speaker and split where the speaker changes."""
+    labels = [_speaker_for_span(w.start, w.end, speaker_segments) for w in seg.words]
+    first_known = next((label for label in labels if label), None)
+    if first_known is None:
+        return [AlignedSentence(seg.text, seg.start, seg.end, UNKNOWN_SPEAKER)]
+
+    # A word with no speaker nearby joins the turn before it (or, at the start,
+    # the first known one) rather than starting a turn of its own.
+    filled, current = [], first_known
+    for label in labels:
+        current = label or current
+        filled.append(current)
+
+    runs = [
+        (speaker, [word for word, _ in group])
+        for speaker, group in groupby(zip(seg.words, filled), key=lambda pair: pair[1])
+    ]
+    if len(runs) == 1:  # one speaker throughout: keep Whisper's segment as-is
+        return [AlignedSentence(seg.text, seg.start, seg.end, runs[0][0])]
+    return [
+        AlignedSentence(
+            text="".join(w.text for w in words).strip(),
+            start=words[0].start,
+            end=words[-1].end,
+            speaker=speaker,
+        )
+        for speaker, words in runs
+    ]
+
+
 def assign_speakers_to_sentences(
     transcription: TranscriptionResult, speaker_segments: list[SpeakerSegment]
 ) -> list[AlignedSentence]:
-    """Assign each transcript segment to the speaker with the largest overlap.
+    """Attribute the transcript to speakers.
 
-    Returns a list of :class:`AlignedSentence`.
+    Segments with word timings are split wherever the speaker changes, so a
+    segment spanning two speakers becomes two rows. Segments without word
+    timings go whole to the speaker they overlap most. Returns a list of
+    :class:`AlignedSentence`.
     """
     segments = transcription.segments
     if not segments or not speaker_segments:
@@ -232,20 +322,11 @@ def assign_speakers_to_sentences(
 
     result = []
     for seg in segments:
-        assigned_speaker = "Unknown Speaker"
-        best_overlap = 0
-
-        for sp in speaker_segments:
-            if seg.start <= sp.end and seg.end >= sp.start:
-                overlap = min(seg.end, sp.end) - max(seg.start, sp.start)
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    assigned_speaker = sp.speaker
-
-        result.append(
-            AlignedSentence(
-                text=seg.text, start=seg.start, end=seg.end, speaker=assigned_speaker
+        if seg.words:
+            result.extend(_split_segment_by_speaker(seg, speaker_segments))
+        else:
+            speaker = _speaker_for_span(seg.start, seg.end, speaker_segments)
+            result.append(
+                AlignedSentence(seg.text, seg.start, seg.end, speaker or UNKNOWN_SPEAKER)
             )
-        )
-
     return result

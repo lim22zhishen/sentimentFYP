@@ -9,13 +9,13 @@ stored under the legacy key ``token``).
 """
 
 import os
+from functools import lru_cache
 
 # Copy model files instead of symlinking them in the HuggingFace cache. Avoids
 # the Windows "required privilege is not held" (WinError 1314) symlink error on
 # machines without Developer Mode / admin rights. Set before HF libs import.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 
-import torch
 from dotenv import load_dotenv
 
 # Load variables from a local .env file if present (no-op on Streamlit Cloud).
@@ -45,9 +45,16 @@ def get_secret(env_name, secrets_key=None, default=None):
 # diarization loader reports a friendly error if it's missing when actually used.
 HUGGINGFACE_TOKEN = get_secret("HUGGINGFACE_TOKEN", "token")
 
-# Compute device. Uses the GPU when available (e.g. an NVIDIA CUDA card).
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# transformers `pipeline(device=...)` wants an int: 0 = first GPU, -1 = CPU.
-HF_DEVICE = 0 if DEVICE == "cuda" else -1
-# faster-whisper compute type: float16 on GPU, int8 on CPU.
-ASR_COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
+
+@lru_cache(maxsize=1)
+def get_device() -> str:
+    """Compute device: ``"cuda"`` when an NVIDIA GPU is usable, else ``"cpu"``.
+
+    torch is imported here rather than at module level so ``src`` (and the test
+    suite) can be imported without the multi-GB torch install.
+    """
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"

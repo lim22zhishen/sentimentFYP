@@ -4,12 +4,11 @@ These wrap the repeated "show a sentiment results table / chart / export" steps
 so the Text and Audio flows in ``app.py`` share one render path.
 """
 
+import math
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-
-# Map the POSITIVE / NEUTRAL / NEGATIVE labels to numeric values for plotting.
-SENTIMENT_MAP = {"positive": 1, "neutral": 0, "negative": -1}
 
 
 def style_table(row):
@@ -23,7 +22,7 @@ def style_table(row):
 
 
 def style_y_axis(fig):
-    """Show sentiment values as labels on the y-axis."""
+    """Label the polarity axis: -1 Negative, 0 Neutral, +1 Positive."""
     fig.update_layout(
         yaxis=dict(
             tickmode='array',
@@ -42,37 +41,43 @@ def render_sentiment_table(df: pd.DataFrame) -> None:
         return
     display = df.copy()
     display["Score"] = display["Score"].apply(lambda x: f"{float(x):.2f}")
-    for col in ("Start Time", "End Time"):
+    display["Polarity"] = display["Polarity"].apply(lambda x: f"{float(x):+.2f}")
+    for col in ("Start Time", "End Time", "Mid Time"):
         if col in display.columns:
             display[col] = display[col].apply(lambda x: f"{float(x):.2f}")
     st.dataframe(display.style.apply(style_table, axis=1))
 
 
 def render_sentiment_chart(df: pd.DataFrame, x_col: str, x_title: str) -> None:
-    """Plot sentiment (mapped to -1/0/1) over ``x_col``, colored by speaker."""
+    """Plot polarity over ``x_col``, colored by speaker."""
     if df.empty:
         return
-    plot_df = df.copy()
-    plot_df["SentimentValue"] = plot_df["Sentiment"].str.lower().map(SENTIMENT_MAP)
     fig = px.line(
-        plot_df, x=x_col, y="SentimentValue", color="Speaker",
+        df, x=x_col, y="Polarity", color="Speaker",
         title="Sentiment Changes Over Time", markers=True,
-        labels={x_col: x_title, "SentimentValue": "Sentiment"},
+        hover_data=["Sentiment", "Score"],
+        labels={x_col: x_title, "Polarity": "Sentiment"},
     )
     style_y_axis(fig)
+    if pd.api.types.is_integer_dtype(df[x_col]):
+        # Whole-number axis (turns): no "1.5" ticks, at most ~12 labels.
+        fig.update_xaxes(tick0=1, dtick=max(1, math.ceil(df[x_col].max() / 12)))
     fig.update_traces(marker=dict(size=10))
     st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Each point is P(positive) − P(negative): +1 is confidently positive, "
+        "−1 confidently negative, and points near 0 are neutral or uncertain."
+    )
 
 
-def render_speaker_summary(df: pd.DataFrame) -> None:
-    """Show per-speaker line counts and average sentiment (most-positive first)."""
-    if df.empty or "Speaker" not in df.columns:
-        return
-    tmp = df.copy()
-    tmp["Value"] = tmp["Sentiment"].str.lower().map(SENTIMENT_MAP)
+def speaker_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-speaker line counts, average polarity and mood (most-positive first).
+
+    Pure function (no Streamlit) so it can be unit-tested.
+    """
     summary = (
-        tmp.groupby("Speaker")
-        .agg(Lines=("Sentiment", "size"), AvgSentiment=("Value", "mean"))
+        df.groupby("Speaker")
+        .agg(Lines=("Sentiment", "size"), AvgSentiment=("Polarity", "mean"))
         .reset_index()
         .sort_values("AvgSentiment", ascending=False)
     )
@@ -80,8 +85,15 @@ def render_speaker_summary(df: pd.DataFrame) -> None:
     summary["Mood"] = summary["AvgSentiment"].apply(
         lambda v: "Positive" if v > 0.15 else "Negative" if v < -0.15 else "Neutral"
     )
+    return summary
+
+
+def render_speaker_summary(df: pd.DataFrame) -> None:
+    """Show the per-speaker summary table."""
+    if df.empty or "Speaker" not in df.columns:
+        return
     st.write("Per-speaker summary:")
-    st.dataframe(summary, hide_index=True)
+    st.dataframe(speaker_summary(df), hide_index=True)
 
 
 def build_transcript(data: dict) -> str:

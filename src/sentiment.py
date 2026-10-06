@@ -32,6 +32,18 @@ def _normalize_label(label) -> str:
     return _LABEL_MAP.get(str(label).strip().lower(), str(label).strip().upper())
 
 
+def _to_result(label_scores: list[dict]) -> SentimentResult:
+    """Build a result from one input's scores for every label."""
+    probs = {_normalize_label(s["label"]): float(s["score"]) for s in label_scores}
+    label = max(probs, key=probs.get)
+    polarity = round(probs.get("POSITIVE", 0.0) - probs.get("NEGATIVE", 0.0), 2)
+    return SentimentResult(
+        sentiment=label,
+        confidence=round(probs[label], 2),
+        polarity=polarity + 0.0,  # turns -0.0 into 0.0 so it doesn't display as "-0.00"
+    )
+
+
 def analyze_sentiment(texts: list[str]) -> list[SentimentResult]:
     """Classify each string in ``texts``.
 
@@ -42,19 +54,15 @@ def analyze_sentiment(texts: list[str]) -> list[SentimentResult]:
         return []
 
     classifier = load_sentiment_pipeline()
-    results = classifier(items, truncation=True, batch_size=16)
+    # top_k=None returns every label's probability (not just the top one), which
+    # polarity needs. The result is one list of label scores per input.
+    results = classifier(items, truncation=True, batch_size=16, top_k=None)
 
-    # A single input can return a dict rather than a list.
-    if isinstance(results, dict):
+    # Guard against a single input coming back un-nested.
+    if len(items) == 1 and results and isinstance(results[0], dict):
         results = [results]
 
-    return [
-        SentimentResult(
-            sentiment=_normalize_label(r["label"]),
-            confidence=round(float(r["score"]), 2),
-        )
-        for r in results
-    ]
+    return [_to_result(label_scores) for label_scores in results]
 
 
 def split_conversation(text: str) -> list[Turn]:
