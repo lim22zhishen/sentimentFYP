@@ -19,19 +19,31 @@ class Turn:
 
 @dataclass
 class SentimentResult:
-    """A single classification: label + confidence."""
+    """A single classification: label, its confidence, and overall polarity."""
 
     sentiment: str  # POSITIVE / NEUTRAL / NEGATIVE
-    confidence: float
+    confidence: float  # probability of ``sentiment``
+    polarity: float  # P(positive) - P(negative), from -1 to +1
+
+
+@dataclass
+class TranscriptWord:
+    """One transcribed word with its time span (seconds)."""
+
+    text: str  # as Whisper emits it, usually with a leading space
+    start: float
+    end: float
 
 
 @dataclass
 class TranscriptSegment:
-    """A transcribed chunk with its time span (seconds)."""
+    """A transcribed chunk with its time span (seconds) and, when available,
+    per-word timings."""
 
     text: str
     start: float
     end: float
+    words: list[TranscriptWord] = field(default_factory=list)
 
 
 @dataclass

@@ -11,23 +11,34 @@ test-friendly.
 """
 
 import inspect
+import os
 from functools import lru_cache
 
-from src.config import ASR_COMPUTE_TYPE, DEVICE, HF_DEVICE, HUGGINGFACE_TOKEN
+from src.config import HUGGINGFACE_TOKEN, get_device
 
-# Multilingual Whisper (faster-whisper / CTranslate2). Uses the GPU and avoids
-# torchcodec, which fails to load on Windows.
-ASR_MODEL = "large-v3"
 # Multilingual sentiment with POSITIVE / NEUTRAL / NEGATIVE labels.
 SENTIMENT_MODEL = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
 DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+
+
+def asr_model_name() -> str:
+    """Whisper model for faster-whisper (CTranslate2, no torchcodec).
+
+    Set ``ASR_MODEL`` in ``.env`` (e.g. ``medium``, ``small``) to override. The
+    default is ``large-v3`` on a GPU and ``small`` on CPU, where large-v3 is
+    impractically slow.
+    """
+    return os.getenv("ASR_MODEL") or ("large-v3" if get_device() == "cuda" else "small")
 
 
 @lru_cache(maxsize=1)
 def load_asr_model():
     from faster_whisper import WhisperModel
 
-    return WhisperModel(ASR_MODEL, device=DEVICE, compute_type=ASR_COMPUTE_TYPE)
+    device = get_device()
+    # float16 on GPU; int8 on CPU, where float16 is unsupported or slow.
+    compute_type = "float16" if device == "cuda" else "int8"
+    return WhisperModel(asr_model_name(), device=device, compute_type=compute_type)
 
 
 @lru_cache(maxsize=1)
@@ -37,7 +48,8 @@ def load_sentiment_pipeline():
     return hf_pipeline(
         "sentiment-analysis",
         model=SENTIMENT_MODEL,
-        device=HF_DEVICE,
+        # transformers wants an int device: 0 = first GPU, -1 = CPU.
+        device=0 if get_device() == "cuda" else -1,
     )
 
 
@@ -60,5 +72,5 @@ def load_diarization_pipeline():
     pipe = DiarizationPipeline.from_pretrained(
         DIARIZATION_MODEL, **{auth_kwarg: HUGGINGFACE_TOKEN}
     )
-    pipe.to(torch.device(DEVICE))
+    pipe.to(torch.device(get_device()))
     return pipe

@@ -1,3 +1,4 @@
 # Development / test dependencies. Install into the same .venv:
 #   pip install -r requirements-dev.txt
 pytest>=8.0
+streamlit>=1.56   # AppTest file-upload support, used by tests/test_app.py

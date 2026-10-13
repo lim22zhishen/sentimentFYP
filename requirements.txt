@@ -5,7 +5,7 @@
 # cards too). CPU-only users can drop the extra index and install plain torch.
 --extra-index-url https://download.pytorch.org/whl/cu128
 
-streamlit>=1.40
+streamlit>=1.51              # st.plotly_chart(width="stretch")
 pandas>=2.2,<3
 plotly>=5.24
 python-dotenv>=1.0
